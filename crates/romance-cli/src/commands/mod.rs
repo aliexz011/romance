@@ -1,5 +1,5 @@
-pub mod activate;
 pub mod add;
+pub mod addon;
 pub mod check;
 pub mod db;
 pub mod destroy;
@@ -68,23 +68,17 @@ pub enum Commands {
         #[command(subcommand)]
         command: DestroyCommands,
     },
+    /// List or check status of addons
+    Addon {
+        #[command(subcommand)]
+        command: AddonCommands,
+    },
     /// Check project health and dependencies
     Doctor,
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
         shell: clap_complete::Shell,
-    },
-    /// Manage license activation
-    Activate {
-        /// License key (ROM-XXXX-XXXX-XXXX-XXXX)
-        key: Option<String>,
-        /// Show current license status
-        #[arg(long)]
-        status: bool,
-        /// Deactivate license
-        #[arg(long)]
-        deactivate: bool,
     },
 }
 
@@ -166,20 +160,15 @@ pub enum DestroyCommands {
     },
 }
 
-pub fn run(cli: Cli) -> Result<()> {
-    // License check — skip for commands that should always work without a license
-    match &cli.command {
-        Commands::Activate { .. } | Commands::Completions { .. } | Commands::Doctor => {
-            // These commands bypass license check
-        }
-        _ => {
-            if let Err(e) = romance_core::license::check_license() {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-        }
-    }
+#[derive(Subcommand)]
+pub enum AddonCommands {
+    /// List all available addons
+    List,
+    /// Show installation status of addons in the current project
+    Status,
+}
 
+pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::New { name } => new::run(&name),
         Commands::Generate { command } => match command {
@@ -220,30 +209,16 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Destroy { command } => match command {
             DestroyCommands::Entity { name } => destroy::run_entity(&name),
         },
+        Commands::Addon { command } => match command {
+            AddonCommands::List => addon::run_list(),
+            AddonCommands::Status => addon::run_status(),
+        },
         Commands::Doctor => doctor::run(),
         Commands::Completions { shell } => {
             use clap::CommandFactory;
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "romance", &mut std::io::stdout());
             Ok(())
-        }
-        Commands::Activate {
-            key,
-            status,
-            deactivate,
-        } => {
-            if deactivate {
-                activate::run_deactivate()
-            } else if status {
-                activate::run_status()
-            } else if let Some(key) = key {
-                activate::run_activate(&key)
-            } else {
-                anyhow::bail!(
-                    "Please provide a license key: romance activate <key>\n\
-                     Or use --status to check current license, --deactivate to remove license."
-                );
-            }
         }
     }
 }

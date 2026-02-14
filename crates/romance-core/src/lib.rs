@@ -3,7 +3,6 @@ pub mod ai_context;
 pub mod config;
 pub mod entity;
 pub mod generator;
-pub mod license;
 pub mod manifest;
 pub mod relation;
 pub mod scaffold;

@@ -9,7 +9,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license-file = "LICENSE"
-repository = "https://github.com/AliExpress/romance"
+license = "MIT"
+repository = "https://github.com/romance-dev/romance"
 homepage = "https://romance.dev"
 authors = ["Romance Team <team@romance.dev>"]

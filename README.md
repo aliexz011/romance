@@ -3,7 +3,7 @@
 **Full-stack code generator for Rust + React.** One command creates a complete project. Another generates full CRUD entities across the entire stack.
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org)
-[![License: Commercial](https://img.shields.io/badge/License-Commercial-orange.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Think Django's `startproject` + `startapp`, but for **Axum + SeaORM** backends and **React + TypeScript + shadcn/ui** frontends.
 
@@ -405,4 +405,4 @@ Detailed guides are available in the [`docs/`](docs/) directory:
 
 ## License
 
-This software is proprietary and requires a valid subscription license. See [LICENSE](LICENSE) for details. Generated code output belongs to you and can be used freely in your projects.
+MIT License. See [LICENSE](LICENSE) for details. Both the CLI tool and all generated code output are free to use for personal and commercial projects.

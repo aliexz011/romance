@@ -2,7 +2,7 @@
 name = "romance-core"
 version.workspace = true
 edition.workspace = true
-license-file.workspace = true
+license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
@@ -26,7 +26,6 @@ sha2 = "0.10"
 similar = "2"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
-dirs = "5"
 
 [dev-dependencies]
 tempfile = "3"
