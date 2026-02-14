@@ -10,10 +10,7 @@ impl Addon for I18nAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -57,12 +54,7 @@ fn install_i18n(project_root: &Path) -> Result<()> {
     println!("  {} frontend/src/lib/i18n.ts", "create".green());
 
     // Add mod i18n to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod i18n;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod i18n;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "i18n")?;
 
     // Inject Accept-Language middleware via ROMANCE:MIDDLEWARE marker
     utils::insert_at_marker(
@@ -78,17 +70,7 @@ fn install_i18n(project_root: &Path) -> Result<()> {
     )?;
 
     // Update romance.toml with i18n feature
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("i18n") {
-            let new_content = content.replace("[features]", "[features]\ni18n = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\ni18n = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "i18n", true)?;
 
     println!();
     println!(

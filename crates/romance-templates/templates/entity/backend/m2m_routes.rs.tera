@@ -1,0 +1,5 @@
+        .route("{{ api_prefix }}/{{ entity_plural }}/{id}/{{ related_plural }}", get({{ entity_snake }}::list_{{ related_plural }}))
+---ROMANCE_SPLIT---
+        .route("{{ api_prefix }}/{{ entity_plural }}/{id}/{{ related_plural }}/{{ related_id_param }}", post({{ entity_snake }}::add_{{ related_snake }}))
+---ROMANCE_SPLIT---
+        .route("{{ api_prefix }}/{{ entity_plural }}/{id}/{{ related_plural }}/{{ related_id_param }}", delete({{ entity_snake }}::remove_{{ related_snake }}))

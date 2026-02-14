@@ -10,10 +10,7 @@ impl Addon for DashboardAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {

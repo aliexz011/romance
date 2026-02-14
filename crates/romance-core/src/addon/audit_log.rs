@@ -10,13 +10,8 @@ impl Addon for AuditLogAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        if !project_root.join("backend/src/auth.rs").exists() {
-            anyhow::bail!("Auth must be generated first. Run: romance generate auth");
-        }
-        Ok(())
+        super::check_romance_project(project_root)?;
+        super::check_auth_exists(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -25,6 +20,10 @@ impl Addon for AuditLogAddon {
 
     fn install(&self, project_root: &Path) -> Result<()> {
         install_audit_log(project_root)
+    }
+
+    fn dependencies(&self) -> Vec<&str> {
+        vec!["auth"]
     }
 }
 
@@ -120,25 +119,10 @@ fn install_audit_log(project_root: &Path) -> Result<()> {
     )?;
 
     // Add mod audit to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod audit;") {
-        let new_content = main_content.replace("mod errors;", "mod audit;\nmod errors;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "audit")?;
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("audit_log") {
-            let new_content = content.replace("[features]", "[features]\naudit_log = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\naudit_log = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "audit_log", true)?;
 
     println!();
     println!(

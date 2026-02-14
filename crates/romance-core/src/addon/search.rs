@@ -10,10 +10,7 @@ impl Addon for SearchAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -61,12 +58,7 @@ fn install_search(project_root: &Path) -> Result<()> {
     );
 
     // Add mod search to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod search;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod search;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "search")?;
 
     // Register search handler
     let mods_marker = "// === ROMANCE:MODS ===";
@@ -77,17 +69,7 @@ fn install_search(project_root: &Path) -> Result<()> {
     )?;
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("search") {
-            let new_content = content.replace("[features]", "[features]\nsearch = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\nsearch = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "search", true)?;
 
     println!();
     println!(

@@ -12,13 +12,8 @@ impl Addon for OauthAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        if !project_root.join("backend/src/auth.rs").exists() {
-            anyhow::bail!("Auth must be generated first. Run: romance generate auth");
-        }
-        Ok(())
+        super::check_romance_project(project_root)?;
+        super::check_auth_exists(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -27,6 +22,10 @@ impl Addon for OauthAddon {
 
     fn install(&self, project_root: &Path) -> Result<()> {
         install_oauth(project_root, &self.provider)
+    }
+
+    fn dependencies(&self) -> Vec<&str> {
+        vec!["auth"]
     }
 }
 
@@ -159,12 +158,7 @@ fn install_oauth(project_root: &Path, provider: &str) -> Result<()> {
     }
 
     // Add mod oauth to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod oauth;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod oauth;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "oauth")?;
 
     // Add dependencies
     crate::generator::auth::insert_cargo_dependency(
@@ -177,19 +171,19 @@ fn install_oauth(project_root: &Path, provider: &str) -> Result<()> {
 
     // Add env vars
     let provider_upper = provider.to_uppercase();
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         &format!("{}_CLIENT_ID=your-client-id", provider_upper),
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         &format!("{}_CLIENT_SECRET=your-client-secret", provider_upper),
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         &format!("{}_CLIENT_ID=your-client-id", provider_upper),
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         &format!("{}_CLIENT_SECRET=your-client-secret", provider_upper),
     )?;

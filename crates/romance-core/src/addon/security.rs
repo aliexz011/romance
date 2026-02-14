@@ -10,10 +10,7 @@ impl Addon for SecurityAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -69,12 +66,7 @@ fn install_security(project_root: &Path) -> Result<()> {
     println!("  {} backend/src/middleware/mod.rs", "create".green());
 
     // Add mod middleware to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod middleware;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod middleware;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "middleware")?;
 
     // Inject middleware into routes/mod.rs
     utils::insert_at_marker(
@@ -100,19 +92,19 @@ fn install_security(project_root: &Path) -> Result<()> {
     )?;
 
     // Add per-user rate limit env vars (anonymous IP-based + authenticated user-based)
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "RATE_LIMIT_ANON_RPM=30",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "RATE_LIMIT_AUTH_RPM=120",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "RATE_LIMIT_ANON_RPM=30",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "RATE_LIMIT_AUTH_RPM=120",
     )?;

@@ -10,10 +10,7 @@ impl Addon for ValidationAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -47,12 +44,7 @@ fn install_validation(project_root: &Path) -> Result<()> {
     println!("  {} backend/src/validation.rs", "create".green());
 
     // Add mod declaration to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod validation;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod validation;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "validation")?;
 
     // Add validator dependencies to Cargo.toml
     crate::generator::auth::insert_cargo_dependency(
@@ -63,28 +55,11 @@ fn install_validation(project_root: &Path) -> Result<()> {
     )?;
 
     // Update romance.toml features
-    update_features_config(project_root, "validation = true")?;
+    super::update_feature_flag(project_root, "validation", true)?;
 
     println!();
     println!("{}", "Validation installed successfully!".green().bold());
     println!("  Entity fields now support validation rules: name:string[min=3,max=100]");
-
-    Ok(())
-}
-
-fn update_features_config(project_root: &Path, line: &str) -> Result<()> {
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-
-    if content.contains("[features]") {
-        if !content.contains(line) {
-            let new_content = content.replace("[features]", &format!("[features]\n{}", line));
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\n{}\n", content.trim_end(), line);
-        std::fs::write(&config_path, new_content)?;
-    }
 
     Ok(())
 }

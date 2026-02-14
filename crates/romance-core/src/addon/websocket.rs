@@ -10,10 +10,7 @@ impl Addon for WebsocketAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -50,13 +47,7 @@ fn install_websocket(project_root: &Path) -> Result<()> {
     println!("  {} frontend/src/lib/useWebSocket.ts", "create".green());
 
     // Add `mod ws;` to main.rs if not present
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod ws;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod ws;");
-        std::fs::write(&main_path, new_content)?;
-        println!("  {} backend/src/main.rs (added mod ws)", "update".green());
-    }
+    super::add_mod_to_main(project_root, "ws")?;
 
     // Inject WS route into routes/mod.rs via MIDDLEWARE marker
     utils::insert_at_marker(
@@ -121,17 +112,7 @@ fn install_websocket(project_root: &Path) -> Result<()> {
     }
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("websocket") {
-            let new_content = content.replace("[features]", "[features]\nwebsocket = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\nwebsocket = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "websocket", true)?;
 
     println!();
     println!(

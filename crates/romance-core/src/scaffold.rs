@@ -1,3 +1,4 @@
+use crate::generator::auth::generate_jwt_secret;
 use crate::manifest::{FileCategory, Manifest};
 use crate::template::TemplateEngine;
 use crate::utils;
@@ -8,25 +9,20 @@ use std::path::Path;
 use std::process::Command;
 use tera::Context;
 
-pub fn create_project(name: &str) -> Result<()> {
-    let project_dir = Path::new(name);
-    if project_dir.exists() {
-        anyhow::bail!("Directory '{}' already exists", name);
-    }
+/// A rendered file entry: (output_path, template_name_or_none, category, content).
+struct RenderedFile {
+    output: String,
+    template: Option<String>,
+    category: FileCategory,
+    content: String,
+}
 
-    println!(
-        "{}",
-        format!("Creating new Romance project: {}", name).bold()
-    );
-
-    let engine = TemplateEngine::new()?;
-    let mut ctx = Context::new();
-    ctx.insert("project_name", name);
-    ctx.insert("project_name_snake", &name.to_snake_case());
-
-    let mut manifest = Manifest::new(name, env!("CARGO_PKG_VERSION"));
-
-    // Backend files
+/// Render backend source templates (Cargo.toml, main.rs, config.rs, etc.).
+fn render_backend_files(
+    engine: &TemplateEngine,
+    ctx: &Context,
+    project_dir: &Path,
+) -> Result<Vec<RenderedFile>> {
     let backend_files = vec![
         ("scaffold/backend/Cargo.toml.tera", "backend/Cargo.toml"),
         ("scaffold/backend/main.rs.tera", "backend/src/main.rs"),
@@ -52,8 +48,9 @@ pub fn create_project(name: &str) -> Result<()> {
         ),
     ];
 
+    let mut rendered = Vec::new();
     for (template, output) in &backend_files {
-        let content = engine.render(template, &ctx)?;
+        let content = engine.render(template, ctx)?;
         let path = project_dir.join(output);
         utils::write_file(&path, &content)?;
         let category = if output.contains("mod.rs") {
@@ -61,11 +58,37 @@ pub fn create_project(name: &str) -> Result<()> {
         } else {
             FileCategory::Scaffold
         };
-        manifest.record_file(output, Some(template), category, &content, None);
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: Some(template.to_string()),
+            category,
+            content,
+        });
         println!("  {} {}", "create".green(), output);
     }
 
-    // Migration crate
+    // Backend .env files
+    let env_content = engine.render("scaffold/backend/env.example.tera", ctx)?;
+    utils::write_file(&project_dir.join("backend/.env.example"), &env_content)?;
+    rendered.push(RenderedFile {
+        output: "backend/.env.example".to_string(),
+        template: Some("scaffold/backend/env.example.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content: env_content.clone(),
+    });
+    println!("  {} backend/.env.example", "create".green());
+    utils::write_file(&project_dir.join("backend/.env"), &env_content)?;
+    println!("  {} backend/.env", "create".green());
+
+    Ok(rendered)
+}
+
+/// Render migration crate templates (Cargo.toml, lib.rs, main.rs).
+fn render_migration_files(
+    engine: &TemplateEngine,
+    ctx: &Context,
+    project_dir: &Path,
+) -> Result<Vec<RenderedFile>> {
     let migration_files = vec![
         (
             "scaffold/backend/migration/Cargo.toml.tera",
@@ -81,8 +104,9 @@ pub fn create_project(name: &str) -> Result<()> {
         ),
     ];
 
+    let mut rendered = Vec::new();
     for (template, output) in &migration_files {
-        let content = engine.render(template, &ctx)?;
+        let content = engine.render(template, ctx)?;
         let path = project_dir.join(output);
         utils::write_file(&path, &content)?;
         let category = if output.contains("lib.rs") {
@@ -90,54 +114,25 @@ pub fn create_project(name: &str) -> Result<()> {
         } else {
             FileCategory::Scaffold
         };
-        manifest.record_file(output, Some(template), category, &content, None);
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: Some(template.to_string()),
+            category,
+            content,
+        });
         println!("  {} {}", "create".green(), output);
     }
 
-    // Backend .env files
-    let env_content = engine.render("scaffold/backend/env.example.tera", &ctx)?;
-    utils::write_file(&project_dir.join("backend/.env.example"), &env_content)?;
-    manifest.record_file(
-        "backend/.env.example",
-        Some("scaffold/backend/env.example.tera"),
-        FileCategory::Scaffold,
-        &env_content,
-        None,
-    );
-    println!("  {} backend/.env.example", "create".green());
-    utils::write_file(&project_dir.join("backend/.env"), &env_content)?;
-    println!("  {} backend/.env", "create".green());
+    Ok(rendered)
+}
 
-    // Backend stub files
-    let entities_mod = "// === ROMANCE:MODS ===\n";
-    utils::write_file(
-        &project_dir.join("backend/src/entities/mod.rs"),
-        entities_mod,
-    )?;
-    manifest.record_file(
-        "backend/src/entities/mod.rs",
-        None,
-        FileCategory::Marker,
-        entities_mod,
-        None,
-    );
-    println!("  {} backend/src/entities/mod.rs", "create".green());
-
-    let handlers_mod = "// === ROMANCE:MODS ===\n";
-    utils::write_file(
-        &project_dir.join("backend/src/handlers/mod.rs"),
-        handlers_mod,
-    )?;
-    manifest.record_file(
-        "backend/src/handlers/mod.rs",
-        None,
-        FileCategory::Marker,
-        handlers_mod,
-        None,
-    );
-    println!("  {} backend/src/handlers/mod.rs", "create".green());
-
-    // Frontend files
+/// Render frontend templates (package.json, vite config, App.tsx, etc.).
+fn render_frontend_files(
+    engine: &TemplateEngine,
+    ctx: &Context,
+    project_dir: &Path,
+    name: &str,
+) -> Result<Vec<RenderedFile>> {
     let frontend_files = vec![
         (
             "scaffold/frontend/package.json.tera",
@@ -159,54 +154,57 @@ pub fn create_project(name: &str) -> Result<()> {
         ),
     ];
 
+    let mut rendered = Vec::new();
     for (template, output) in &frontend_files {
-        let content = engine.render(template, &ctx)?;
+        let content = engine.render(template, ctx)?;
         let path = project_dir.join(output);
         utils::write_file(&path, &content)?;
-        manifest.record_file(output, Some(template), FileCategory::Scaffold, &content, None);
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: Some(template.to_string()),
+            category: FileCategory::Scaffold,
+            content,
+        });
         println!("  {} {}", "create".green(), output);
     }
 
     // Frontend vite-env.d.ts
-    let vite_env_content = engine.render("scaffold/frontend/vite-env.d.ts.tera", &ctx)?;
+    let vite_env_content = engine.render("scaffold/frontend/vite-env.d.ts.tera", ctx)?;
     utils::write_file(
         &project_dir.join("frontend/src/vite-env.d.ts"),
         &vite_env_content,
     )?;
-    manifest.record_file(
-        "frontend/src/vite-env.d.ts",
-        Some("scaffold/frontend/vite-env.d.ts.tera"),
-        FileCategory::Scaffold,
-        &vite_env_content,
-        None,
-    );
+    rendered.push(RenderedFile {
+        output: "frontend/src/vite-env.d.ts".to_string(),
+        template: Some("scaffold/frontend/vite-env.d.ts.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content: vite_env_content,
+    });
     println!("  {} frontend/src/vite-env.d.ts", "create".green());
 
     // Frontend index.css (shadcn/ui theme with Tailwind v4)
-    let index_css = engine.render("scaffold/frontend/index.css.tera", &ctx)?;
+    let index_css = engine.render("scaffold/frontend/index.css.tera", ctx)?;
     utils::write_file(&project_dir.join("frontend/src/index.css"), &index_css)?;
-    manifest.record_file(
-        "frontend/src/index.css",
-        Some("scaffold/frontend/index.css.tera"),
-        FileCategory::Scaffold,
-        &index_css,
-        None,
-    );
+    rendered.push(RenderedFile {
+        output: "frontend/src/index.css".to_string(),
+        template: Some("scaffold/frontend/index.css.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content: index_css,
+    });
     println!("  {} frontend/src/index.css", "create".green());
 
     // Frontend components.json (shadcn/ui config)
-    let components_json = engine.render("scaffold/frontend/components.json.tera", &ctx)?;
+    let components_json = engine.render("scaffold/frontend/components.json.tera", ctx)?;
     utils::write_file(
         &project_dir.join("frontend/components.json"),
         &components_json,
     )?;
-    manifest.record_file(
-        "frontend/components.json",
-        Some("scaffold/frontend/components.json.tera"),
-        FileCategory::Scaffold,
-        &components_json,
-        None,
-    );
+    rendered.push(RenderedFile {
+        output: "frontend/components.json".to_string(),
+        template: Some("scaffold/frontend/components.json.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content: components_json,
+    });
     println!("  {} frontend/components.json", "create".green());
 
     // Frontend index.html
@@ -227,52 +225,23 @@ pub fn create_project(name: &str) -> Result<()> {
         name
     );
     utils::write_file(&project_dir.join("frontend/index.html"), &index_html)?;
-    manifest.record_file(
-        "frontend/index.html",
-        None,
-        FileCategory::Static,
-        &index_html,
-        None,
-    );
+    rendered.push(RenderedFile {
+        output: "frontend/index.html".to_string(),
+        template: None,
+        category: FileCategory::Static,
+        content: index_html,
+    });
     println!("  {} frontend/index.html", "create".green());
 
-    // romance.toml
-    let content = engine.render("scaffold/romance.toml.tera", &ctx)?;
-    utils::write_file(&project_dir.join("romance.toml"), &content)?;
-    manifest.record_file(
-        "romance.toml",
-        Some("scaffold/romance.toml.tera"),
-        FileCategory::Scaffold,
-        &content,
-        None,
-    );
-    println!("  {} romance.toml", "create".green());
+    Ok(rendered)
+}
 
-    // romance.production.toml (environment override example)
-    let content = engine.render("scaffold/romance.production.toml.tera", &ctx)?;
-    utils::write_file(&project_dir.join("romance.production.toml"), &content)?;
-    manifest.record_file(
-        "romance.production.toml",
-        Some("scaffold/romance.production.toml.tera"),
-        FileCategory::Scaffold,
-        &content,
-        None,
-    );
-    println!("  {} romance.production.toml", "create".green());
-
-    // README
-    let content = engine.render("scaffold/README.md.tera", &ctx)?;
-    utils::write_file(&project_dir.join("README.md"), &content)?;
-    manifest.record_file(
-        "README.md",
-        Some("scaffold/README.md.tera"),
-        FileCategory::Scaffold,
-        &content,
-        None,
-    );
-    println!("  {} README.md", "create".green());
-
-    // Docker files (project root)
+/// Render Docker, CI, and project root config templates.
+fn render_docker_files(
+    engine: &TemplateEngine,
+    ctx: &Context,
+    project_dir: &Path,
+) -> Result<Vec<RenderedFile>> {
     let docker_files = vec![
         ("scaffold/docker/Dockerfile.tera", "Dockerfile"),
         (
@@ -290,29 +259,105 @@ pub fn create_project(name: &str) -> Result<()> {
         ("scaffold/docker/dockerignore.tera", ".dockerignore"),
     ];
 
+    let mut rendered = Vec::new();
     for (template, output) in &docker_files {
-        let content = engine.render(template, &ctx)?;
+        let content = engine.render(template, ctx)?;
         let path = project_dir.join(output);
         utils::write_file(&path, &content)?;
-        manifest.record_file(output, Some(template), FileCategory::Scaffold, &content, None);
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: Some(template.to_string()),
+            category: FileCategory::Scaffold,
+            content,
+        });
         println!("  {} {}", "create".green(), output);
     }
 
     // CI files
-    let ci_files = vec![
-        (
-            "scaffold/ci/github-actions.yml.tera",
-            ".github/workflows/ci.yml",
-        ),
-    ];
+    let ci_files = vec![(
+        "scaffold/ci/github-actions.yml.tera",
+        ".github/workflows/ci.yml",
+    )];
 
     for (template, output) in &ci_files {
-        let content = engine.render(template, &ctx)?;
+        let content = engine.render(template, ctx)?;
         let path = project_dir.join(output);
         utils::write_file(&path, &content)?;
-        manifest.record_file(output, Some(template), FileCategory::Scaffold, &content, None);
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: Some(template.to_string()),
+            category: FileCategory::Scaffold,
+            content,
+        });
         println!("  {} {}", "create".green(), output);
     }
+
+    // romance.toml
+    let content = engine.render("scaffold/romance.toml.tera", ctx)?;
+    utils::write_file(&project_dir.join("romance.toml"), &content)?;
+    rendered.push(RenderedFile {
+        output: "romance.toml".to_string(),
+        template: Some("scaffold/romance.toml.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content,
+    });
+    println!("  {} romance.toml", "create".green());
+
+    // romance.production.toml (environment override example)
+    let content = engine.render("scaffold/romance.production.toml.tera", ctx)?;
+    utils::write_file(&project_dir.join("romance.production.toml"), &content)?;
+    rendered.push(RenderedFile {
+        output: "romance.production.toml".to_string(),
+        template: Some("scaffold/romance.production.toml.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content,
+    });
+    println!("  {} romance.production.toml", "create".green());
+
+    // README
+    let content = engine.render("scaffold/README.md.tera", ctx)?;
+    utils::write_file(&project_dir.join("README.md"), &content)?;
+    rendered.push(RenderedFile {
+        output: "README.md".to_string(),
+        template: Some("scaffold/README.md.tera".to_string()),
+        category: FileCategory::Scaffold,
+        content,
+    });
+    println!("  {} README.md", "create".green());
+
+    Ok(rendered)
+}
+
+/// Create non-template stub files (mod.rs markers, .gitignore).
+fn create_stub_files(project_dir: &Path) -> Result<Vec<RenderedFile>> {
+    let mut rendered = Vec::new();
+
+    // Backend stub files
+    let entities_mod = "// === ROMANCE:MODS ===\n";
+    utils::write_file(
+        &project_dir.join("backend/src/entities/mod.rs"),
+        entities_mod,
+    )?;
+    rendered.push(RenderedFile {
+        output: "backend/src/entities/mod.rs".to_string(),
+        template: None,
+        category: FileCategory::Marker,
+        content: entities_mod.to_string(),
+    });
+    println!("  {} backend/src/entities/mod.rs", "create".green());
+
+    let handlers_mod = "// === ROMANCE:MODS ===\n";
+    utils::write_file(
+        &project_dir.join("backend/src/handlers/mod.rs"),
+        handlers_mod,
+    )?;
+    rendered.push(RenderedFile {
+        output: "backend/src/handlers/mod.rs".to_string(),
+        template: None,
+        category: FileCategory::Marker,
+        content: handlers_mod.to_string(),
+    });
+    println!("  {} backend/src/handlers/mod.rs", "create".green());
 
     // .gitignore
     let gitignore = "\
@@ -325,17 +370,19 @@ pub fn create_project(name: &str) -> Result<()> {
 !*.env.example
 ";
     utils::write_file(&project_dir.join(".gitignore"), gitignore)?;
-    manifest.record_file(".gitignore", None, FileCategory::Static, gitignore, None);
+    rendered.push(RenderedFile {
+        output: ".gitignore".to_string(),
+        template: None,
+        category: FileCategory::Static,
+        content: gitignore.to_string(),
+    });
     println!("  {} .gitignore", "create".green());
 
-    // Save manifest
-    manifest.save(project_dir)?;
-    println!("  {} .romance/manifest.json", "create".green());
+    Ok(rendered)
+}
 
-    // Generate project-level CLAUDE.md for AI assistants
-    crate::ai_context::regenerate(project_dir)?;
-
-    // Install frontend dependencies and shadcn/ui components
+/// Install frontend npm dependencies and shadcn/ui components.
+fn install_frontend_deps(project_dir: &Path, name: &str) -> Result<()> {
     let frontend_dir = project_dir.join("frontend");
     println!();
     println!(
@@ -383,6 +430,62 @@ pub fn create_project(name: &str) -> Result<()> {
             println!("    npx shadcn@latest add --all --yes");
         }
     }
+
+    Ok(())
+}
+
+pub fn create_project(name: &str) -> Result<()> {
+    let project_dir = Path::new(name);
+    if project_dir.exists() {
+        anyhow::bail!("Directory '{}' already exists", name);
+    }
+
+    println!(
+        "{}",
+        format!("Creating new Romance project: {}", name).bold()
+    );
+
+    let engine = TemplateEngine::new()?;
+    let mut ctx = Context::new();
+    ctx.insert("project_name", name);
+    ctx.insert("project_name_snake", &name.to_snake_case());
+    ctx.insert("jwt_secret", &generate_jwt_secret());
+
+    let mut manifest = Manifest::new(name, env!("CARGO_PKG_VERSION"));
+
+    // Render all template groups
+    let backend = render_backend_files(&engine, &ctx, project_dir)?;
+    let migration = render_migration_files(&engine, &ctx, project_dir)?;
+    let frontend = render_frontend_files(&engine, &ctx, project_dir, name)?;
+    let docker = render_docker_files(&engine, &ctx, project_dir)?;
+    let stubs = create_stub_files(project_dir)?;
+
+    // Record all rendered files in the manifest
+    for file in backend
+        .iter()
+        .chain(migration.iter())
+        .chain(frontend.iter())
+        .chain(docker.iter())
+        .chain(stubs.iter())
+    {
+        manifest.record_file(
+            &file.output,
+            file.template.as_deref(),
+            file.category.clone(),
+            &file.content,
+            None,
+        );
+    }
+
+    // Save manifest
+    manifest.save(project_dir)?;
+    println!("  {} .romance/manifest.json", "create".green());
+
+    // Generate project-level CLAUDE.md for AI assistants
+    crate::ai_context::regenerate(project_dir)?;
+
+    // Install frontend dependencies and shadcn/ui components
+    install_frontend_deps(project_dir, name)?;
 
     println!();
     println!("{}", "Project created successfully!".green().bold());

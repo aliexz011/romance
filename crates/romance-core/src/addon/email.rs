@@ -10,10 +10,7 @@ impl Addon for EmailAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -53,12 +50,7 @@ fn install_email(project_root: &Path) -> Result<()> {
     );
 
     // Add mod email to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod email;") {
-        let new_content = main_content.replace("mod errors;", "mod email;\nmod errors;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "email")?;
 
     // Register password_reset handler
     let mods_marker = "// === ROMANCE:MODS ===";
@@ -78,60 +70,50 @@ fn install_email(project_root: &Path) -> Result<()> {
     )?;
 
     // Add env vars
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "SMTP_HOST=smtp.example.com",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "SMTP_PORT=587",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "SMTP_USER=your_smtp_user",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "SMTP_PASS=your_smtp_password",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "FROM_EMAIL=noreply@example.com",
     )?;
 
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "SMTP_HOST=smtp.example.com",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "SMTP_PORT=587",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "SMTP_USER=",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "SMTP_PASS=",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "FROM_EMAIL=noreply@example.com",
     )?;
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("email") {
-            let new_content = content.replace("[features]", "[features]\nemail = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\nemail = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "email", true)?;
 
     println!();
     println!(

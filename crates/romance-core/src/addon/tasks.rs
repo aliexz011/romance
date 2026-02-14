@@ -10,10 +10,7 @@ impl Addon for TasksAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -95,34 +92,11 @@ fn install_tasks(project_root: &Path) -> Result<()> {
     println!("  {} backend/src/scheduler.rs", "create".green());
 
     // Add mod tasks and mod scheduler to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod tasks;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod tasks;");
-        std::fs::write(&main_path, new_content)?;
-    }
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod scheduler;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod scheduler;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "tasks")?;
+    super::add_mod_to_main(project_root, "scheduler")?;
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("background_tasks") {
-            let new_content =
-                content.replace("[features]", "[features]\nbackground_tasks = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!(
-            "{}\n[features]\nbackground_tasks = true\n",
-            content.trim_end()
-        );
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "background_tasks", true)?;
 
     println!();
     println!(

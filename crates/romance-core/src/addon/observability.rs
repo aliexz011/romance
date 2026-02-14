@@ -10,10 +10,7 @@ impl Addon for ObservabilityAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -80,14 +77,10 @@ fn install_observability(project_root: &Path) -> Result<()> {
     }
 
     // Add mod middleware to main.rs if not present
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod middleware;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod middleware;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "middleware")?;
 
     // Replace scaffold's tracing init with observability module's init_tracing()
+    let main_path = project_root.join("backend/src/main.rs");
     let main_content = std::fs::read_to_string(&main_path)?;
     if !main_content.contains("init_tracing()") {
         // Find and replace the existing tracing_subscriber block
@@ -133,11 +126,11 @@ fn install_observability(project_root: &Path) -> Result<()> {
     )?;
 
     // Add RUST_LOG to .env
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "RUST_LOG=info",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "RUST_LOG=info",
     )?;

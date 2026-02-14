@@ -10,13 +10,8 @@ impl Addon for ApiKeysAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        if !project_root.join("backend/src/auth.rs").exists() {
-            anyhow::bail!("Auth must be generated first. Run: romance generate auth");
-        }
-        Ok(())
+        super::check_romance_project(project_root)?;
+        super::check_auth_exists(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -25,6 +20,10 @@ impl Addon for ApiKeysAddon {
 
     fn install(&self, project_root: &Path) -> Result<()> {
         install_api_keys(project_root)
+    }
+
+    fn dependencies(&self) -> Vec<&str> {
+        vec!["auth"]
     }
 }
 
@@ -74,12 +73,7 @@ fn install_api_keys(project_root: &Path) -> Result<()> {
     )?;
 
     // Add mod api_keys to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod api_keys;") {
-        let new_content = main_content.replace("mod errors;", "mod api_keys;\nmod errors;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "api_keys")?;
 
     // Add sha2 dependency (for hashing API keys)
     crate::generator::auth::insert_cargo_dependency(

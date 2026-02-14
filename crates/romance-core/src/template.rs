@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use heck::{ToLowerCamelCase, ToPascalCase, ToSnakeCase, ToTitleCase};
 use romance_templates::Templates;
 use std::collections::HashMap;
@@ -32,7 +32,10 @@ impl TemplateEngine {
     }
 
     pub fn render(&self, template_name: &str, context: &Context) -> Result<String> {
-        let result = self.tera.render(template_name, context)?;
+        let result = self
+            .tera
+            .render(template_name, context)
+            .with_context(|| format!("Failed to render template '{}'", template_name))?;
         Ok(result)
     }
 }

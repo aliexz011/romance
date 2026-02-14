@@ -3,7 +3,7 @@
 **Full-stack code generator for Rust + React.** One command creates a complete project. Another generates full CRUD entities across the entire stack.
 
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 
 Think Django's `startproject` + `startapp`, but for **Axum + SeaORM** backends and **React + TypeScript + shadcn/ui** frontends.
 

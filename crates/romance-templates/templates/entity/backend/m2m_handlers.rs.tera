@@ -1,0 +1,47 @@
+pub async fn list_{{ related_plural }}(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> crate::errors::AppResult<crate::api::ApiResponse<Vec<crate::entities::{{ related_snake }}::Model>>> {
+    use crate::api::ok;
+
+    let entity = crate::entities::{{ entity_snake }}::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+
+    let items = entity
+        .find_related(crate::entities::{{ related_snake }}::Entity)
+        .all(&state.db)
+        .await?;
+    Ok(ok(items))
+}
+---ROMANCE_SPLIT---
+pub async fn add_{{ related_snake }}(
+    State(state): State<AppState>,
+    Path((id, {{ related_snake }}_id)): Path<(Uuid, Uuid)>,
+) -> crate::errors::AppResult<crate::api::ApiResponse<()>> {
+    use crate::api::ok;
+
+    let junction = crate::entities::{{ junction_snake }}::ActiveModel {
+        id: sea_orm::Set(Uuid::new_v4()),
+        {{ entity_snake }}_id: sea_orm::Set(id),
+        {{ related_snake }}_id: sea_orm::Set({{ related_snake }}_id),
+        created_at: sea_orm::Set(chrono::Utc::now().fixed_offset()),
+    };
+    junction.insert(&state.db).await?;
+    Ok(ok(()))
+}
+---ROMANCE_SPLIT---
+pub async fn remove_{{ related_snake }}(
+    State(state): State<AppState>,
+    Path((id, {{ related_snake }}_id)): Path<(Uuid, Uuid)>,
+) -> crate::errors::AppResult<crate::api::ApiResponse<()>> {
+    use crate::api::ok;
+
+    crate::entities::{{ junction_snake }}::Entity::delete_many()
+        .filter(crate::entities::{{ junction_snake }}::Column::{{ entity_name }}Id.eq(id))
+        .filter(crate::entities::{{ junction_snake }}::Column::{{ related_name }}Id.eq({{ related_snake }}_id))
+        .exec(&state.db)
+        .await?;
+    Ok(ok(()))
+}

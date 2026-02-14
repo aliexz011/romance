@@ -20,12 +20,7 @@ pub fn generate_seed_file(project_root: &Path) -> Result<()> {
     println!("  {} backend/src/seed.rs", "create".green());
 
     // Add mod seed to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod seed;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod seed;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    crate::addon::add_mod_to_main(project_root, "seed")?;
 
     // Add fake crate dependency
     crate::generator::auth::insert_cargo_dependency(

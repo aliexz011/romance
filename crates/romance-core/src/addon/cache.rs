@@ -10,10 +10,7 @@ impl Addon for CacheAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -42,12 +39,7 @@ fn install_cache(project_root: &Path) -> Result<()> {
     println!("  {} backend/src/cache.rs", "create".green());
 
     // Add mod cache to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod cache;") {
-        let new_content = main_content.replace("mod errors;", "mod cache;\nmod errors;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "cache")?;
 
     // Add dependencies
     crate::generator::auth::insert_cargo_dependency(
@@ -59,27 +51,17 @@ fn install_cache(project_root: &Path) -> Result<()> {
     )?;
 
     // Add env vars
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "REDIS_URL=redis://127.0.0.1:6379",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "REDIS_URL=redis://127.0.0.1:6379",
     )?;
 
     // Update romance.toml
-    let config_path = project_root.join("romance.toml");
-    let content = std::fs::read_to_string(&config_path)?;
-    if content.contains("[features]") {
-        if !content.contains("cache") {
-            let new_content = content.replace("[features]", "[features]\ncache = true");
-            std::fs::write(&config_path, new_content)?;
-        }
-    } else {
-        let new_content = format!("{}\n[features]\ncache = true\n", content.trim_end());
-        std::fs::write(&config_path, new_content)?;
-    }
+    super::update_feature_flag(project_root, "cache", true)?;
 
     println!();
     println!(

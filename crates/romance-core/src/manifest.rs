@@ -25,7 +25,7 @@ pub struct FileRecord {
     pub generated_by_version: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum FileCategory {
     Scaffold,

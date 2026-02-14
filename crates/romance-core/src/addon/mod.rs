@@ -23,6 +23,17 @@ pub trait Addon {
     fn check_prerequisites(&self, project_root: &Path) -> Result<()>;
     fn is_already_installed(&self, project_root: &Path) -> bool;
     fn install(&self, project_root: &Path) -> Result<()>;
+
+    /// Uninstall the addon. Default implementation returns an error.
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        let _ = project_root;
+        anyhow::bail!("Uninstall not yet supported for '{}'", self.name())
+    }
+
+    /// Return the names of addons this addon depends on.
+    fn dependencies(&self) -> Vec<&str> {
+        vec![]
+    }
 }
 
 /// Run an addon: check prerequisites, skip if already installed, then install.
@@ -40,6 +51,107 @@ pub fn run_addon(addon: &dyn Addon, project_root: &Path) -> Result<()> {
     crate::ai_context::regenerate(project_root)?;
 
     Ok(())
+}
+
+// =========================================================================
+// Shared helper functions for addon implementations
+// =========================================================================
+
+/// Check that the project root contains a romance.toml file.
+pub fn check_romance_project(project_root: &Path) -> Result<()> {
+    if !project_root.join("romance.toml").exists() {
+        anyhow::bail!("Not a Romance project (romance.toml not found)");
+    }
+    Ok(())
+}
+
+/// Check that auth has been generated (backend/src/auth.rs exists).
+pub fn check_auth_exists(project_root: &Path) -> Result<()> {
+    if !project_root.join("backend/src/auth.rs").exists() {
+        anyhow::bail!("Auth must be generated first. Run: romance generate auth");
+    }
+    Ok(())
+}
+
+/// Add a `mod <mod_name>;` declaration to `backend/src/main.rs`.
+///
+/// Uses `insert_at_marker()` with the `// === ROMANCE:MAIN_MODS ===` marker
+/// if present, otherwise falls back to `str::replace("mod errors;", ...)`.
+pub fn add_mod_to_main(project_root: &Path, mod_name: &str) -> Result<()> {
+    let main_path = project_root.join("backend/src/main.rs");
+    let main_content = std::fs::read_to_string(&main_path)?;
+    let mod_line = format!("mod {};", mod_name);
+
+    if main_content.contains(&mod_line) {
+        return Ok(());
+    }
+
+    let marker = "// === ROMANCE:MAIN_MODS ===";
+    if main_content.contains(marker) {
+        crate::utils::insert_at_marker(&main_path, marker, &mod_line)?;
+    } else {
+        // Fallback for projects scaffolded before the marker existed
+        let new_content = main_content.replace("mod errors;", &format!("mod errors;\n{}", mod_line));
+        std::fs::write(&main_path, new_content)?;
+    }
+
+    Ok(())
+}
+
+/// Add a dependency line to `backend/Cargo.toml`.
+///
+/// Uses `insert_at_marker()` with the `# === ROMANCE:DEPENDENCIES ===` marker
+/// if present, otherwise falls back to appending at end of file.
+pub fn add_cargo_dependency(project_root: &Path, dep_line: &str) -> Result<()> {
+    let cargo_path = project_root.join("backend/Cargo.toml");
+    let content = std::fs::read_to_string(&cargo_path)?;
+
+    // Extract dependency name (everything before ' =')
+    let dep_name = dep_line.split('=').next().unwrap_or("").trim();
+    if content.contains(&format!("{} =", dep_name)) {
+        return Ok(());
+    }
+
+    let marker = "# === ROMANCE:DEPENDENCIES ===";
+    if content.contains(marker) {
+        crate::utils::insert_at_marker(&cargo_path, marker, dep_line)?;
+    } else {
+        // Fallback: append to end of file
+        let new_content = format!("{}\n{}\n", content.trim_end(), dep_line);
+        std::fs::write(&cargo_path, new_content)?;
+    }
+
+    Ok(())
+}
+
+/// Update `romance.toml` to set a feature flag under the `[features]` section.
+///
+/// If the `[features]` section doesn't exist, it creates one.
+pub fn update_feature_flag(project_root: &Path, feature: &str, value: bool) -> Result<()> {
+    let config_path = project_root.join("romance.toml");
+    let content = std::fs::read_to_string(&config_path)?;
+    let line = format!("{} = {}", feature, value);
+
+    if content.contains(&line) {
+        return Ok(());
+    }
+
+    if content.contains("[features]") {
+        if !content.contains(feature) {
+            let new_content = content.replace("[features]", &format!("[features]\n{}", line));
+            std::fs::write(&config_path, new_content)?;
+        }
+    } else {
+        let new_content = format!("{}\n[features]\n{}\n", content.trim_end(), line);
+        std::fs::write(&config_path, new_content)?;
+    }
+
+    Ok(())
+}
+
+/// Append an environment variable line to a `.env` file if not already present.
+pub fn append_env_var(path: &Path, line: &str) -> Result<()> {
+    crate::generator::auth::append_env_var(path, line)
 }
 
 #[cfg(test)]
@@ -505,5 +617,165 @@ mod tests {
             provider: "google".to_string(),
         };
         assert!(addon.is_already_installed(dir.path()));
+    }
+
+    // =========================================================================
+    // D) Uninstall default implementation tests
+    // =========================================================================
+
+    #[test]
+    fn uninstall_returns_error_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let addon = security::SecurityAddon;
+        let result = addon.uninstall(dir.path());
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Uninstall not yet supported"));
+        assert!(err_msg.contains("security"));
+    }
+
+    // =========================================================================
+    // E) Dependencies tests
+    // =========================================================================
+
+    #[test]
+    fn audit_log_depends_on_auth() {
+        let addon = audit_log::AuditLogAddon;
+        assert_eq!(addon.dependencies(), vec!["auth"]);
+    }
+
+    #[test]
+    fn oauth_depends_on_auth() {
+        let addon = oauth::OauthAddon {
+            provider: "google".to_string(),
+        };
+        assert_eq!(addon.dependencies(), vec!["auth"]);
+    }
+
+    #[test]
+    fn api_keys_depends_on_auth() {
+        let addon = api_keys::ApiKeysAddon;
+        assert_eq!(addon.dependencies(), vec!["auth"]);
+    }
+
+    #[test]
+    fn security_has_no_dependencies() {
+        let addon = security::SecurityAddon;
+        assert!(addon.dependencies().is_empty());
+    }
+
+    #[test]
+    fn validation_has_no_dependencies() {
+        let addon = validation::ValidationAddon;
+        assert!(addon.dependencies().is_empty());
+    }
+
+    // =========================================================================
+    // F) Shared helper tests
+    // =========================================================================
+
+    #[test]
+    fn check_romance_project_fails_without_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(check_romance_project(dir.path()).is_err());
+    }
+
+    #[test]
+    fn check_romance_project_passes_with_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        write_romance_toml(dir.path());
+        assert!(check_romance_project(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn check_auth_exists_fails_without_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(check_auth_exists(dir.path()).is_err());
+    }
+
+    #[test]
+    fn check_auth_exists_passes_with_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(dir.path().join("backend/src/auth.rs"), "").unwrap();
+        assert!(check_auth_exists(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn add_mod_to_main_with_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(
+            dir.path().join("backend/src/main.rs"),
+            "mod errors;\n// === ROMANCE:MAIN_MODS ===\nmod handlers;\n",
+        )
+        .unwrap();
+        add_mod_to_main(dir.path(), "storage").unwrap();
+        let content = std::fs::read_to_string(dir.path().join("backend/src/main.rs")).unwrap();
+        assert!(content.contains("mod storage;"));
+        assert!(content.contains("// === ROMANCE:MAIN_MODS ==="));
+    }
+
+    #[test]
+    fn add_mod_to_main_without_marker_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(
+            dir.path().join("backend/src/main.rs"),
+            "mod errors;\nmod handlers;\n",
+        )
+        .unwrap();
+        add_mod_to_main(dir.path(), "storage").unwrap();
+        let content = std::fs::read_to_string(dir.path().join("backend/src/main.rs")).unwrap();
+        assert!(content.contains("mod storage;"));
+    }
+
+    #[test]
+    fn add_mod_to_main_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(
+            dir.path().join("backend/src/main.rs"),
+            "mod errors;\n// === ROMANCE:MAIN_MODS ===\nmod handlers;\n",
+        )
+        .unwrap();
+        add_mod_to_main(dir.path(), "storage").unwrap();
+        add_mod_to_main(dir.path(), "storage").unwrap();
+        let content = std::fs::read_to_string(dir.path().join("backend/src/main.rs")).unwrap();
+        assert_eq!(content.matches("mod storage;").count(), 1);
+    }
+
+    #[test]
+    fn update_feature_flag_creates_section() {
+        let dir = tempfile::tempdir().unwrap();
+        write_romance_toml(dir.path());
+        update_feature_flag(dir.path(), "cache", true).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("romance.toml")).unwrap();
+        assert!(content.contains("[features]"));
+        assert!(content.contains("cache = true"));
+    }
+
+    #[test]
+    fn update_feature_flag_appends_to_existing_section() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("romance.toml"),
+            "[project]\nname = \"test\"\n[features]\nauth = true\n",
+        )
+        .unwrap();
+        update_feature_flag(dir.path(), "cache", true).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("romance.toml")).unwrap();
+        assert!(content.contains("cache = true"));
+        assert!(content.contains("auth = true"));
+    }
+
+    #[test]
+    fn update_feature_flag_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        write_romance_toml(dir.path());
+        update_feature_flag(dir.path(), "cache", true).unwrap();
+        update_feature_flag(dir.path(), "cache", true).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("romance.toml")).unwrap();
+        assert_eq!(content.matches("cache = true").count(), 1);
     }
 }

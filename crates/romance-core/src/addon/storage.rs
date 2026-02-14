@@ -10,10 +10,7 @@ impl Addon for StorageAddon {
     }
 
     fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
-        if !project_root.join("romance.toml").exists() {
-            anyhow::bail!("Not a Romance project (romance.toml not found)");
-        }
-        Ok(())
+        super::check_romance_project(project_root)
     }
 
     fn is_already_installed(&self, project_root: &Path) -> bool {
@@ -69,12 +66,7 @@ fn install_storage(project_root: &Path) -> Result<()> {
     );
 
     // Add mod storage to main.rs
-    let main_path = project_root.join("backend/src/main.rs");
-    let main_content = std::fs::read_to_string(&main_path)?;
-    if !main_content.contains("mod storage;") {
-        let new_content = main_content.replace("mod errors;", "mod errors;\nmod storage;");
-        std::fs::write(&main_path, new_content)?;
-    }
+    super::add_mod_to_main(project_root, "storage")?;
 
     // Register upload routes
     let mods_marker = "// === ROMANCE:MODS ===";
@@ -104,27 +96,27 @@ fn install_storage(project_root: &Path) -> Result<()> {
     )?;
 
     // Add env vars for storage configuration
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "UPLOAD_DIR=./uploads",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "UPLOAD_URL=/uploads",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env"),
         "MAX_FILE_SIZE=10MB",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "UPLOAD_DIR=./uploads",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "UPLOAD_URL=/uploads",
     )?;
-    crate::generator::auth::append_env_var(
+    super::append_env_var(
         &project_root.join("backend/.env.example"),
         "MAX_FILE_SIZE=10MB",
     )?;

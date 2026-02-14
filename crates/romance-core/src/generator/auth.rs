@@ -120,14 +120,15 @@ pub fn generate() -> Result<()> {
         ],
     )?;
 
-    // Add JWT_SECRET to .env and .env.example
+    // Add JWT_SECRET to .env and .env.example (random per project)
+    let jwt_secret = generate_jwt_secret();
     append_env_var(
         &project_dir.join("backend/.env"),
-        "JWT_SECRET=romance-dev-secret-change-in-production",
+        &format!("JWT_SECRET={}", jwt_secret),
     )?;
     append_env_var(
         &project_dir.join("backend/.env.example"),
-        "JWT_SECRET=romance-dev-secret-change-in-production",
+        &format!("JWT_SECRET={}", jwt_secret),
     )?;
 
     // Add mod auth to main.rs
@@ -193,11 +194,22 @@ pub fn insert_cargo_dependency(path: &Path, deps: &[(&str, &str)]) -> Result<()>
 
 pub fn append_env_var(path: &Path, line: &str) -> Result<()> {
     if let Ok(content) = std::fs::read_to_string(path) {
-        if content.contains(line) {
+        // Check by key (everything before '=') to avoid duplicates
+        let key = line.split('=').next().unwrap_or(line);
+        if content.lines().any(|l| l.starts_with(&format!("{}=", key))) {
             return Ok(());
         }
         let new_content = format!("{}\n{}\n", content.trim_end(), line);
         std::fs::write(path, new_content)?;
     }
     Ok(())
+}
+
+/// Generate a random 64-character hex string for use as a JWT secret.
+pub fn generate_jwt_secret() -> String {
+    format!(
+        "{:032x}{:032x}",
+        uuid::Uuid::new_v4().as_u128(),
+        uuid::Uuid::new_v4().as_u128()
+    )
 }
