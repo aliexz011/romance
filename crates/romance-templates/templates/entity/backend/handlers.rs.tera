@@ -1,0 +1,564 @@
+use axum::extract::{Path, Query, State};
+use sea_orm::*;
+use uuid::Uuid;
+
+use crate::api::{ok, ok_page, ApiResponse};
+{% if has_belongs_to %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Model, Update{{ entity_name }}, {{ entity_name }}Response, {{ entity_name }}DetailResponse, BulkCreate{{ entity_name }}, BulkDelete};
+{% else %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Model, Update{{ entity_name }}, {{ entity_name }}Response, BulkCreate{{ entity_name }}, BulkDelete};
+{% endif %}
+use crate::errors::AppResult;
+use crate::pagination::{PageMeta, PageRequest};
+use crate::routes::AppState;
+{% if has_auth %}use crate::auth::AuthUser;
+{% endif %}
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct ListParams {
+    #[serde(flatten)]
+    pub page: PageRequest,
+{% for field in fields %}{% if field.filter_method != "skip" %}    pub {{ field.name }}: Option<String>,
+{% endif %}{% endfor %}    pub sort: Option<String>,
+    pub order: Option<String>,
+}
+
+{% if has_belongs_to %}
+/// Query parameter for requesting nested related entities on single-item GET.
+/// Usage: `GET /api/{{ entity_name_snake | plural }}/123?include={% for rel in belongs_to_relations %}{{ rel.target_snake }}{% if not loop.last %},{% endif %}{% endfor %}`
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct IncludeQuery {
+    pub include: Option<String>,
+}
+{% endif %}
+
+#[utoipa::path(
+    get,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}",
+    params(ListParams),
+    responses(
+        (status = 200, description = "List {{ entity_name_snake | plural }}", body = Vec<{{ entity_name }}Response>)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn list(
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
+    let page = params.page.page();
+    let per_page = params.page.per_page();
+
+    let mut query = Entity::find();
+
+{% if soft_delete %}    query = query.filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null());
+{% endif %}
+    // Apply field filters
+{% for field in fields %}{% if field.filter_method == "contains" %}    if let Some(ref v) = params.{{ field.name }} {
+        if !v.is_empty() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.contains(v));
+        }
+    }
+{% elif field.filter_method == "eq" %}{% if field.rust_type == "bool" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<bool>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% elif field.rust_type == "i32" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<i32>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% elif field.rust_type == "i64" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<i64>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% elif field.rust_type == "f64" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<f64>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% elif field.rust_type == "Decimal" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<rust_decimal::Decimal>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% elif field.rust_type == "Uuid" %}    if let Some(ref v) = params.{{ field.name }} {
+        if let Ok(parsed) = v.parse::<Uuid>() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
+        }
+    }
+{% else %}    if let Some(ref v) = params.{{ field.name }} {
+        if !v.is_empty() {
+            query = query.filter(Column::{{ field.name | pascal_case }}.eq(v.as_str()));
+        }
+    }
+{% endif %}{% endif %}{% endfor %}
+    // Apply sorting
+    let order = match params.order.as_deref() {
+        Some("asc") | Some("ASC") => Order::Asc,
+        _ => Order::Desc,
+    };
+
+    query = match params.sort.as_deref() {
+{% for field in fields %}        Some("{{ field.name }}") => query.order_by(Column::{{ field.name | pascal_case }}, order),
+{% endfor %}        Some("created_at") => query.order_by(Column::CreatedAt, order),
+        Some("updated_at") => query.order_by(Column::UpdatedAt, order),
+        _ => query.order_by(Column::CreatedAt, Order::Desc),
+    };
+
+    let paginator = query.paginate(&state.db, per_page);
+    let total = paginator.num_items().await?;
+    let data: Vec<{{ entity_name }}Response> = paginator.fetch_page(page - 1).await?.into_iter().map(Into::into).collect();
+    let meta = PageMeta::from_request(&params.page, total);
+
+    Ok(ok_page(data, meta))
+}
+
+{% if has_belongs_to %}
+#[utoipa::path(
+    get,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}",
+    params(
+        ("id" = Uuid, Path, description = "{{ entity_name }} ID")
+    ),
+    responses(
+        (status = 200, description = "Get {{ entity_name }} by ID", body = {{ entity_name }}Response)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn get(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Query(include_query): Query<IncludeQuery>,
+) -> AppResult<ApiResponse<serde_json::Value>> {
+{% if soft_delete %}    let item = Entity::find_by_id(id)
+        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}
+
+    // If ?include= is present, fetch related entities and return DetailResponse
+    if let Some(ref include_str) = include_query.include {
+        let includes: Vec<&str> = include_str.split(',').map(|s| s.trim()).collect();
+        let mut detail = {{ entity_name }}DetailResponse::from(item);
+
+{% for rel in belongs_to_relations %}
+        if includes.contains(&"{{ rel.target_snake }}") {
+{% if rel.optional %}            if let Some(fk_val) = detail.{{ rel.fk_field }} {
+                let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(fk_val)
+                    .one(&state.db)
+                    .await?;
+                if let Some(r) = related {
+                    detail.{{ rel.target_snake }} = Some(serde_json::to_value(r)?);
+                }
+            }
+{% else %}            let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(detail.{{ rel.fk_field }})
+                .one(&state.db)
+                .await?;
+            if let Some(r) = related {
+                detail.{{ rel.target_snake }} = Some(serde_json::to_value(r)?);
+            }
+{% endif %}
+        }
+{% endfor %}
+
+        return Ok(ok(serde_json::to_value(detail)?));
+    }
+
+    Ok(ok(serde_json::to_value({{ entity_name }}Response::from(item))?))
+}
+{% else %}
+#[utoipa::path(
+    get,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}",
+    params(
+        ("id" = Uuid, Path, description = "{{ entity_name }} ID")
+    ),
+    responses(
+        (status = 200, description = "Get {{ entity_name }} by ID", body = {{ entity_name }}Response)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn get(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
+{% if soft_delete %}    let item = Entity::find_by_id(id)
+        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}
+
+    Ok(ok({{ entity_name }}Response::from(item)))
+}
+{% endif %}
+
+#[utoipa::path(
+    post,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}",
+    request_body = Create{{ entity_name }},
+    responses(
+        (status = 200, description = "Create {{ entity_name }}", body = {{ entity_name }}Response)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn create(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+{% if has_validation %}    crate::validation::ValidatedJson(input): crate::validation::ValidatedJson<Create{{ entity_name }}>,
+{% else %}    axum::Json(input): axum::Json<Create{{ entity_name }}>,
+{% endif %}
+) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
+    let now = chrono::Utc::now().fixed_offset();
+    let id = Uuid::new_v4();
+    let model = ActiveModel {
+        id: Set(id),
+{% for field in fields %}        {{ field.name }}: Set(input.{{ field.name }}),
+{% endfor %}        created_at: Set(now),
+        updated_at: Set(now),
+{% if soft_delete %}        deleted_at: Set(None),
+{% endif %}
+        ..Default::default()
+    };
+
+    // Emit pre-create hook
+    if let Ok(data) = serde_json::to_value(&input) {
+        state.event_bus.emit(crate::events::EntityEvent::PreCreate {
+            entity_type: "{{ entity_name }}".to_string(),
+            data,
+        });
+    }
+
+    let result = model.insert(&state.db).await?;
+
+{% if has_audit %}    // Audit log
+    if let Ok(data) = serde_json::to_value(&result) {
+        let _ = crate::audit::AuditLogger::log_create(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &data).await;
+    }
+{% endif %}
+
+    // Emit entity created event
+    if let Ok(data) = serde_json::to_value(&result) {
+        state.event_bus.emit(crate::events::EntityEvent::Created {
+            entity_type: "{{ entity_name }}".to_string(),
+            entity_id: id.to_string(),
+            data,
+        });
+    }
+
+    Ok(ok({{ entity_name }}Response::from(result)))
+}
+
+#[utoipa::path(
+    put,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}",
+    params(
+        ("id" = Uuid, Path, description = "{{ entity_name }} ID")
+    ),
+    request_body = Update{{ entity_name }},
+    responses(
+        (status = 200, description = "Update {{ entity_name }}", body = {{ entity_name }}Response)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn update(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    axum::Json(input): axum::Json<Update{{ entity_name }}>,
+) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
+    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+
+    let now = chrono::Utc::now().fixed_offset();
+    let mut model: ActiveModel = item.into();
+
+{% for field in fields -%}
+{% if field.optional %}    if let Some(val) = input.{{ field.name }} {
+        model.{{ field.name }} = Set(Some(val));
+    }
+{% else %}    if let Some(val) = input.{{ field.name }} {
+        model.{{ field.name }} = Set(val);
+    }
+{% endif -%}
+{% endfor %}    model.updated_at = Set(now);
+
+    // Emit pre-update hook
+    if let Ok(data) = serde_json::to_value(&input) {
+        state.event_bus.emit(crate::events::EntityEvent::PreUpdate {
+            entity_type: "{{ entity_name }}".to_string(),
+            entity_id: id.to_string(),
+            data,
+        });
+    }
+
+    let result = model.update(&state.db).await?;
+
+{% if has_audit %}    // Audit log
+    if let Ok(changes) = serde_json::to_value(&input) {
+        let _ = crate::audit::AuditLogger::log_update(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &changes).await;
+    }
+{% endif %}
+
+    // Emit entity updated event
+    if let Ok(data) = serde_json::to_value(&result) {
+        state.event_bus.emit(crate::events::EntityEvent::Updated {
+            entity_type: "{{ entity_name }}".to_string(),
+            entity_id: id.to_string(),
+            data,
+        });
+    }
+
+    Ok(ok({{ entity_name }}Response::from(result)))
+}
+
+{% if soft_delete %}
+#[utoipa::path(
+    delete,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}",
+    params(
+        ("id" = Uuid, Path, description = "{{ entity_name }} ID")
+    ),
+    responses(
+        (status = 200, description = "Delete {{ entity_name }}")
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn delete(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<()>> {
+    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+
+    let now = chrono::Utc::now().fixed_offset();
+    let mut model: ActiveModel = item.into();
+    model.deleted_at = Set(Some(now));
+
+    // Emit pre-delete hook
+    state.event_bus.emit(crate::events::EntityEvent::PreDelete {
+        entity_type: "{{ entity_name }}".to_string(),
+        entity_id: id.to_string(),
+    });
+
+    model.update(&state.db).await?;
+
+{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
+{% endif %}
+
+    // Emit entity deleted event
+    state.event_bus.emit(crate::events::EntityEvent::Deleted {
+        entity_type: "{{ entity_name }}".to_string(),
+        entity_id: id.to_string(),
+    });
+
+    Ok(ok(()))
+}
+
+pub async fn restore(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
+    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+
+    let mut model: ActiveModel = item.into();
+    model.deleted_at = Set(None);
+    model.updated_at = Set(chrono::Utc::now().fixed_offset());
+    let result = model.update(&state.db).await?;
+
+    Ok(ok({{ entity_name }}Response::from(result)))
+}
+
+pub async fn force_delete(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<()>> {
+    let result = Entity::delete_by_id(id).exec(&state.db).await?;
+
+    if result.rows_affected == 0 {
+        return Err(crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)));
+    }
+
+    Ok(ok(()))
+}
+{% else %}
+#[utoipa::path(
+    delete,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}",
+    params(
+        ("id" = Uuid, Path, description = "{{ entity_name }} ID")
+    ),
+    responses(
+        (status = 200, description = "Delete {{ entity_name }}")
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn delete(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<()>> {
+    // Emit pre-delete hook
+    state.event_bus.emit(crate::events::EntityEvent::PreDelete {
+        entity_type: "{{ entity_name }}".to_string(),
+        entity_id: id.to_string(),
+    });
+
+    let result = Entity::delete_by_id(id).exec(&state.db).await?;
+
+    if result.rows_affected == 0 {
+        return Err(crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)));
+    }
+
+{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
+{% endif %}
+
+    // Emit entity deleted event
+    state.event_bus.emit(crate::events::EntityEvent::Deleted {
+        entity_type: "{{ entity_name }}".to_string(),
+        entity_id: id.to_string(),
+    });
+
+    Ok(ok(()))
+}
+{% endif %}
+
+{% if has_searchable_fields %}
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct SearchQuery {
+    pub q: String,
+    pub limit: Option<u64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/search",
+    params(SearchQuery),
+    responses(
+        (status = 200, description = "Search {{ entity_name_snake | plural }}", body = Vec<{{ entity_name }}Response>)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchQuery>,
+) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
+    use sea_orm::QueryOrder;
+
+    let query = params.q.trim();
+    if query.is_empty() {
+        return Ok(ok(vec![]));
+    }
+
+    let limit = params.limit.unwrap_or(20).min(100);
+
+    // Build search using ILIKE for simple matching
+    // For full tsvector search, use the search addon's helper
+    let mut condition = Condition::any();
+{% for field in fields -%}
+{% if field.searchable %}    condition = condition.add(crate::entities::{{ entity_name_snake }}::Column::{{ field.name | pascal_case }}.contains(query));
+{% endif -%}
+{% endfor %}
+
+{% if soft_delete %}    let results: Vec<{{ entity_name }}Response> = Entity::find()
+        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .filter(condition)
+        .limit(limit)
+        .all(&state.db)
+        .await?
+        .into_iter().map(Into::into).collect();
+{% else %}    let results: Vec<{{ entity_name }}Response> = Entity::find()
+        .filter(condition)
+        .limit(limit)
+        .all(&state.db)
+        .await?
+        .into_iter().map(Into::into).collect();
+{% endif %}
+
+    Ok(ok(results))
+}
+{% endif %}
+
+#[utoipa::path(
+    post,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/bulk",
+    request_body = BulkCreate{{ entity_name }},
+    responses(
+        (status = 200, description = "Bulk create {{ entity_name_snake | plural }}", body = Vec<{{ entity_name }}Response>)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn bulk_create(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    axum::Json(input): axum::Json<BulkCreate{{ entity_name }}>,
+) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
+    let mut results = Vec::new();
+    for item in input.items {
+        let now = chrono::Utc::now().fixed_offset();
+        let id = Uuid::new_v4();
+        let model = ActiveModel {
+            id: Set(id),
+{% for field in fields %}            {{ field.name }}: Set(item.{{ field.name }}),
+{% endfor %}            created_at: Set(now),
+            updated_at: Set(now),
+{% if soft_delete %}            deleted_at: Set(None),
+{% endif %}
+            ..Default::default()
+        };
+        let result = model.insert(&state.db).await?;
+        results.push({{ entity_name }}Response::from(result));
+    }
+    Ok(ok(results))
+}
+
+#[utoipa::path(
+    delete,
+    path = "{{ api_prefix }}/{{ entity_name_snake | plural }}/bulk",
+    request_body = BulkDelete,
+    responses(
+        (status = 200, description = "Bulk delete {{ entity_name_snake | plural }}", body = serde_json::Value)
+    ),
+    tag = "{{ entity_name }}"
+)]
+pub async fn bulk_delete(
+{% if has_auth %}    _auth: AuthUser,
+{% endif %}    State(state): State<AppState>,
+    axum::Json(input): axum::Json<BulkDelete>,
+) -> AppResult<ApiResponse<serde_json::Value>> {
+{% if soft_delete %}    let now = chrono::Utc::now().fixed_offset();
+    let result = Entity::update_many()
+        .filter(Column::Id.is_in(input.ids))
+        .col_expr(Column::DeletedAt, Expr::value(Some(now)))
+        .exec(&state.db)
+        .await?;
+{% else %}    let result = Entity::delete_many()
+        .filter(Column::Id.is_in(input.ids))
+        .exec(&state.db)
+        .await?;
+{% endif %}
+    Ok(ok(serde_json::json!({ "deleted": result.rows_affected })))
+}
+
+// === ROMANCE:RELATION_HANDLERS ===
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

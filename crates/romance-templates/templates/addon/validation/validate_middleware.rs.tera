@@ -1,0 +1,106 @@
+use axum::extract::rejection::JsonRejection;
+use axum::extract::FromRequest;
+use axum::response::IntoResponse;
+use serde::de::DeserializeOwned;
+use validator::Validate;
+
+/// An extractor that validates the JSON body using the `validator` crate.
+/// Use this instead of `axum::Json` in handlers that need validation.
+///
+/// ```rust
+/// use crate::validation::ValidatedJson;
+///
+/// pub async fn create(
+///     ValidatedJson(input): ValidatedJson<CreateProduct>,
+/// ) -> AppResult<ApiResponse<Model>> {
+///     // input is already validated
+/// }
+/// ```
+pub struct ValidatedJson<T>(pub T);
+
+impl<S, T> FromRequest<S> for ValidatedJson<T>
+where
+    T: DeserializeOwned + Validate,
+    S: Send + Sync,
+    axum::Json<T>: FromRequest<S, Rejection = JsonRejection>,
+{
+    type Rejection = ValidationError;
+
+    async fn from_request(
+        req: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let axum::Json(value) = axum::Json::<T>::from_request(req, state)
+            .await
+            .map_err(|e| ValidationError::JsonError(e.to_string()))?;
+
+        value
+            .validate()
+            .map_err(|e| ValidationError::InvalidInput(format_validation_errors(&e)))?;
+
+        Ok(ValidatedJson(value))
+    }
+}
+
+#[derive(Debug)]
+pub enum ValidationError {
+    JsonError(String),
+    InvalidInput(Vec<FieldError>),
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+impl IntoResponse for ValidationError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, body) = match self {
+            ValidationError::JsonError(msg) => (
+                axum::http::StatusCode::BAD_REQUEST,
+                serde_json::json!({
+                    "success": false,
+                    "error": {
+                        "code": "INVALID_JSON",
+                        "message": msg,
+                    }
+                }),
+            ),
+            ValidationError::InvalidInput(errors) => (
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                serde_json::json!({
+                    "success": false,
+                    "error": {
+                        "code": "VALIDATION_ERROR",
+                        "message": "Validation failed",
+                        "fields": errors,
+                    }
+                }),
+            ),
+        };
+
+        (status, axum::Json(body)).into_response()
+    }
+}
+
+fn format_validation_errors(errors: &validator::ValidationErrors) -> Vec<FieldError> {
+    let mut field_errors = Vec::new();
+
+    for (field, errs) in errors.field_errors() {
+        for err in errs {
+            let message = err
+                .message
+                .as_ref()
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| format!("Validation failed for {}", field));
+
+            field_errors.push(FieldError {
+                field: field.to_string(),
+                message,
+            });
+        }
+    }
+
+    field_errors
+}

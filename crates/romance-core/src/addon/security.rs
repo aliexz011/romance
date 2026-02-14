@@ -1,0 +1,141 @@
+use crate::addon::Addon;
+use anyhow::Result;
+use std::path::Path;
+
+pub struct SecurityAddon;
+
+impl Addon for SecurityAddon {
+    fn name(&self) -> &str {
+        "security"
+    }
+
+    fn check_prerequisites(&self, project_root: &Path) -> Result<()> {
+        if !project_root.join("romance.toml").exists() {
+            anyhow::bail!("Not a Romance project (romance.toml not found)");
+        }
+        Ok(())
+    }
+
+    fn is_already_installed(&self, project_root: &Path) -> bool {
+        project_root
+            .join("backend/src/middleware/security_headers.rs")
+            .exists()
+    }
+
+    fn install(&self, project_root: &Path) -> Result<()> {
+        install_security(project_root)
+    }
+}
+
+fn install_security(project_root: &Path) -> Result<()> {
+    use crate::template::TemplateEngine;
+    use crate::utils;
+    use colored::Colorize;
+    use tera::Context;
+
+    println!("{}", "Installing security middleware...".bold());
+
+    let engine = TemplateEngine::new()?;
+    let ctx = Context::new();
+
+    // Generate security headers middleware
+    let content = engine.render("addon/security/security_headers.rs.tera", &ctx)?;
+    utils::write_file(
+        &project_root.join("backend/src/middleware/security_headers.rs"),
+        &content,
+    )?;
+    println!(
+        "  {} backend/src/middleware/security_headers.rs",
+        "create".green()
+    );
+
+    // Generate rate limiter
+    let content = engine.render("addon/security/rate_limit.rs.tera", &ctx)?;
+    utils::write_file(
+        &project_root.join("backend/src/middleware/rate_limit.rs"),
+        &content,
+    )?;
+    println!(
+        "  {} backend/src/middleware/rate_limit.rs",
+        "create".green()
+    );
+
+    // Generate middleware mod.rs
+    let content = engine.render("addon/security/middleware_mod.rs.tera", &ctx)?;
+    utils::write_file(
+        &project_root.join("backend/src/middleware/mod.rs"),
+        &content,
+    )?;
+    println!("  {} backend/src/middleware/mod.rs", "create".green());
+
+    // Add mod middleware to main.rs
+    let main_path = project_root.join("backend/src/main.rs");
+    let main_content = std::fs::read_to_string(&main_path)?;
+    if !main_content.contains("mod middleware;") {
+        let new_content = main_content.replace("mod errors;", "mod errors;\nmod middleware;");
+        std::fs::write(&main_path, new_content)?;
+    }
+
+    // Inject middleware into routes/mod.rs
+    utils::insert_at_marker(
+        &project_root.join("backend/src/routes/mod.rs"),
+        "// === ROMANCE:MIDDLEWARE ===",
+        "        .layer(axum::middleware::from_fn(crate::middleware::security_headers::security_headers))",
+    )?;
+    utils::insert_at_marker(
+        &project_root.join("backend/src/routes/mod.rs"),
+        "// === ROMANCE:MIDDLEWARE ===",
+        "        .layer(axum::middleware::from_fn(crate::middleware::rate_limit::rate_limit_middleware))",
+    )?;
+
+    // Add dependencies
+    crate::generator::auth::insert_cargo_dependency(
+        &project_root.join("backend/Cargo.toml"),
+        &[
+            ("tower", r#"{ version = "0.5", features = ["limit", "timeout"] }"#),
+            ("governor", r#""0.7""#),
+            ("tower-governor", r#""0.5""#),
+            ("base64", r#""0.22""#),
+        ],
+    )?;
+
+    // Add per-user rate limit env vars (anonymous IP-based + authenticated user-based)
+    crate::generator::auth::append_env_var(
+        &project_root.join("backend/.env"),
+        "RATE_LIMIT_ANON_RPM=30",
+    )?;
+    crate::generator::auth::append_env_var(
+        &project_root.join("backend/.env"),
+        "RATE_LIMIT_AUTH_RPM=120",
+    )?;
+    crate::generator::auth::append_env_var(
+        &project_root.join("backend/.env.example"),
+        "RATE_LIMIT_ANON_RPM=30",
+    )?;
+    crate::generator::auth::append_env_var(
+        &project_root.join("backend/.env.example"),
+        "RATE_LIMIT_AUTH_RPM=120",
+    )?;
+
+    // Update romance.toml
+    let config_path = project_root.join("romance.toml");
+    let content = std::fs::read_to_string(&config_path)?;
+    if !content.contains("[security]") {
+        let new_content = format!(
+            "{}\n[security]\nrate_limit_anon_rpm = 30\nrate_limit_auth_rpm = 120\ncors_origins = [\"http://localhost:5173\"]\n",
+            content.trim_end()
+        );
+        std::fs::write(&config_path, new_content)?;
+    }
+
+    println!();
+    println!(
+        "{}",
+        "Security middleware installed successfully!".green().bold()
+    );
+    println!("  Security headers, per-user rate limiting, and CORS configured.");
+    println!("  Anonymous: {} RPM (IP-based), Authenticated: {} RPM (user-based).", 30, 120);
+    println!("  Configure in romance.toml under [security].");
+
+    Ok(())
+}

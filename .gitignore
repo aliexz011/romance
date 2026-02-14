@@ -1,0 +1,26 @@
+# Build
+/target
+**/target
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Romance license
+# (users' license files should not be committed)
+
+# Temporary
+*.tmp
+*.bak

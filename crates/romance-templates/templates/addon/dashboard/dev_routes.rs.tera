@@ -1,0 +1,8 @@
+use axum::{routing::get, Router};
+use crate::handlers::dev_dashboard;
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/dev/dashboard", get(dev_dashboard::dashboard))
+}

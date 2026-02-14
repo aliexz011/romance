@@ -1,0 +1,42 @@
+use axum::{
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
+    routing::{delete, get, post, put},
+    Router,
+};
+
+use crate::auth::AdminUser;
+use crate::errors::AppError;
+use crate::handlers;
+use crate::routes::AppState;
+
+/// Middleware that requires the caller to have admin privileges.
+/// Extracts `AdminUser` from the request — returns 403 if the token
+/// is missing, invalid, or the user does not have the "admin" role.
+async fn require_admin(
+    _admin: AdminUser,
+    request: Request,
+    next: Next,
+) -> Result<Response, AppError> {
+    Ok(next.run(request).await)
+}
+
+pub fn router() -> Router<AppState> {
+    let admin_routes = Router::new()
+        .route("/api/admin/dashboard", get(handlers::admin::dashboard))
+{% for entity in entities %}
+        .route("/api/admin/{{ entity.name_snake | plural }}", get(handlers::{{ entity.name_snake }}::list))
+        .route("/api/admin/{{ entity.name_snake | plural }}", post(handlers::{{ entity.name_snake }}::create))
+        .route("/api/admin/{{ entity.name_snake | plural }}/{id}", get(handlers::{{ entity.name_snake }}::get))
+        .route("/api/admin/{{ entity.name_snake | plural }}/{id}", put(handlers::{{ entity.name_snake }}::update))
+        .route("/api/admin/{{ entity.name_snake | plural }}/{id}", delete(handlers::{{ entity.name_snake }}::delete))
+{% endfor %}
+        // === ROMANCE:ADMIN_ROUTES ===
+        .route_layer(middleware::from_fn(require_admin));
+
+    admin_routes
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

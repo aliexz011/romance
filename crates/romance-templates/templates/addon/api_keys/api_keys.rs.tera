@@ -1,0 +1,108 @@
+use axum::extract::{Request, State};
+use axum::http::{header, StatusCode};
+use axum::middleware::Next;
+use axum::response::Response;
+use sea_orm::*;
+use uuid::Uuid;
+
+/// API Key model - stores hashed keys
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, serde::Serialize)]
+#[sea_orm(table_name = "api_keys")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    pub name: String,
+    pub key_hash: String,
+    pub key_prefix: String,  // First 8 chars for identification
+    pub user_id: Uuid,       // Owner of the key
+    pub scopes: Option<String>,  // Comma-separated scopes
+    pub expires_at: Option<DateTimeWithTimeZone>,
+    pub last_used_at: Option<DateTimeWithTimeZone>,
+    pub created_at: DateTimeWithTimeZone,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+/// Generate a new API key. Returns (raw_key, model) — raw_key is shown once to user.
+pub fn generate_api_key(user_id: Uuid, name: &str, scopes: Option<&str>) -> (String, ActiveModel) {
+    use sha2::{Sha256, Digest};
+
+    let raw_key = format!("rom_{}", Uuid::new_v4().to_string().replace("-", ""));
+    let key_prefix = raw_key[..12].to_string();
+
+    let mut hasher = Sha256::new();
+    hasher.update(raw_key.as_bytes());
+    let key_hash = format!("{:x}", hasher.finalize());
+
+    let now = chrono::Utc::now().fixed_offset();
+    let model = ActiveModel {
+        id: Set(Uuid::new_v4()),
+        name: Set(name.to_string()),
+        key_hash: Set(key_hash),
+        key_prefix: Set(key_prefix),
+        user_id: Set(user_id),
+        scopes: Set(scopes.map(String::from)),
+        expires_at: Set(None),
+        last_used_at: Set(None),
+        created_at: Set(now),
+    };
+
+    (raw_key, model)
+}
+
+/// Validate an API key from the X-API-Key header.
+pub async fn validate_api_key(db: &DatabaseConnection, raw_key: &str) -> Option<Model> {
+    use sha2::{Sha256, Digest};
+
+    let mut hasher = Sha256::new();
+    hasher.update(raw_key.as_bytes());
+    let key_hash = format!("{:x}", hasher.finalize());
+
+    let key = Entity::find()
+        .filter(Column::KeyHash.eq(&key_hash))
+        .one(db)
+        .await
+        .ok()??;
+
+    // Check expiration
+    if let Some(expires_at) = key.expires_at {
+        if expires_at < chrono::Utc::now().fixed_offset() {
+            return None;
+        }
+    }
+
+    // Update last_used_at
+    let mut active: ActiveModel = key.clone().into();
+    active.last_used_at = Set(Some(chrono::Utc::now().fixed_offset()));
+    let _ = active.update(db).await;
+
+    Some(key)
+}
+
+/// Middleware that accepts either JWT (Authorization: Bearer) or API Key (X-API-Key header).
+pub async fn api_key_middleware(
+    State(state): State<crate::routes::AppState>,
+    mut request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    // If Authorization header exists, let the normal auth flow handle it
+    if request.headers().contains_key(header::AUTHORIZATION) {
+        return Ok(next.run(request).await);
+    }
+
+    // Check X-API-Key header
+    if let Some(api_key) = request.headers().get("X-API-Key").and_then(|v| v.to_str().ok()) {
+        if let Some(key_model) = validate_api_key(&state.db, api_key).await {
+            // Store the user_id in request extensions for handlers to access
+            request.extensions_mut().insert(key_model.user_id);
+            return Ok(next.run(request).await);
+        }
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // No auth provided — let downstream handlers decide
+    Ok(next.run(request).await)
+}

@@ -1,0 +1,44 @@
+use axum::{http::StatusCode, routing::get, Json, Router};
+use sea_orm::DatabaseConnection;
+use serde_json::json;
+
+use crate::events::EventBus;
+
+// === ROMANCE:MODS ===
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DatabaseConnection,
+    pub event_bus: EventBus,
+}
+
+pub fn create_router(db: DatabaseConnection) -> Router {
+    let event_bus = EventBus::new();
+    let state = AppState { db, event_bus };
+
+    Router::new()
+        .route("/health", get(health))
+        .route("/ready", get(ready))
+// === ROMANCE:ROUTES ===
+// === ROMANCE:MIDDLEWARE ===
+        .with_state(state)
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(json!({
+        "status": "ok",
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    }))
+}
+
+async fn ready(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match sea_orm::DatabaseConnection::ping(&state.db).await {
+        Ok(_) => Ok(Json(json!({
+            "status": "ready",
+            "database": "connected"
+        }))),
+        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+    }
+}

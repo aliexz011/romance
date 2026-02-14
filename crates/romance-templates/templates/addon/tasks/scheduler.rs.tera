@@ -1,0 +1,52 @@
+use std::time::Duration;
+use tokio::time;
+
+pub struct ScheduledJob {
+    pub name: String,
+    pub interval: Duration,
+    pub handler: Box<dyn Fn() -> tokio::task::JoinHandle<()> + Send + Sync>,
+}
+
+pub struct Scheduler {
+    jobs: Vec<ScheduledJob>,
+}
+
+impl Scheduler {
+    pub fn new() -> Self {
+        Self { jobs: Vec::new() }
+    }
+
+    pub fn add_job<F>(&mut self, name: &str, interval: Duration, handler: F)
+    where
+        F: Fn() -> tokio::task::JoinHandle<()> + Send + Sync + 'static,
+    {
+        self.jobs.push(ScheduledJob {
+            name: name.to_string(),
+            interval,
+            handler: Box::new(handler),
+        });
+    }
+
+    pub fn start(self) {
+        for job in self.jobs {
+            let name = job.name.clone();
+            let interval = job.interval;
+            tokio::spawn(async move {
+                let mut ticker = time::interval(interval);
+                loop {
+                    ticker.tick().await;
+                    tracing::info!("Running scheduled job: {}", name);
+                    (job.handler)();
+                }
+            });
+        }
+    }
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// === ROMANCE:SCHEDULED_JOBS ===

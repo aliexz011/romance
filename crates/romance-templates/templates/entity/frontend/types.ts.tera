@@ -1,0 +1,23 @@
+export interface {{ entity_name }} {
+  id: string;
+{% for field in fields -%}
+{% if field.optional %}  {{ field.name }}?: {{ field.ts_type }};
+{% else %}  {{ field.name }}: {{ field.ts_type }};
+{% endif -%}
+{% endfor %}  created_at: string;
+  updated_at: string;
+}
+
+export interface Create{{ entity_name }} {
+{% for field in fields -%}
+{% if field.optional %}  {{ field.name }}?: {{ field.ts_type }};
+{% else %}  {{ field.name }}: {{ field.ts_type }};
+{% endif -%}
+{% endfor %}}
+
+export interface Update{{ entity_name }} {
+{% for field in fields %}  {{ field.name }}?: {{ field.ts_type }};
+{% endfor %}}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

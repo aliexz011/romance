@@ -1,0 +1,106 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect } from 'react';
+import { authApi } from './api';
+import type { LoginRequest, RegisterRequest, User } from './types';
+
+const AUTH_QUERY_KEY = 'auth_current_user';
+
+export function useCurrentUser() {
+  return useQuery({
+    queryKey: [AUTH_QUERY_KEY],
+    queryFn: () => authApi.me(),
+    enabled: !!localStorage.getItem('auth_token'),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useLogin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: LoginRequest) => authApi.login(data),
+    onSuccess: (response) => {
+      localStorage.setItem('auth_token', response.token);
+      queryClient.invalidateQueries({ queryKey: [AUTH_QUERY_KEY] });
+    },
+  });
+}
+
+export function useRegister() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: RegisterRequest) => authApi.register(data),
+    onSuccess: (response) => {
+      localStorage.setItem('auth_token', response.token);
+      queryClient.invalidateQueries({ queryKey: [AUTH_QUERY_KEY] });
+    },
+  });
+}
+
+export function useLogout() {
+  const queryClient = useQueryClient();
+  return () => {
+    localStorage.removeItem('auth_token');
+    queryClient.invalidateQueries({ queryKey: [AUTH_QUERY_KEY] });
+    queryClient.clear();
+  };
+}
+
+/**
+ * Hook that requires the user to be authenticated.
+ * Redirects to /login if not authenticated.
+ * Returns the authenticated user.
+ */
+export function useRequireAuth(): { user: User | null; isLoading: boolean } {
+  const navigate = useNavigate();
+  const { data: user, isLoading } = useCurrentUser();
+
+  useEffect(() => {
+    if (!isLoading && !user && !localStorage.getItem('auth_token')) {
+      navigate('/login', { replace: true });
+    }
+  }, [user, isLoading, navigate]);
+
+  return { user: user ?? null, isLoading };
+}
+
+/**
+ * Hook that requires the user to have a specific role.
+ * Redirects to /login if not authenticated.
+ * Redirects to / (home) if authenticated but lacking the required role.
+ * Returns the authenticated user and a boolean indicating role match.
+ */
+export function useRequireRole(requiredRole: string): {
+  user: User | null;
+  isLoading: boolean;
+  hasRole: boolean;
+} {
+  const navigate = useNavigate();
+  const { data: user, isLoading } = useCurrentUser();
+
+  const hasRole = useCallback(
+    (u: User | null | undefined) => {
+      if (!u) return false;
+      return u.role === requiredRole || u.role === 'admin';
+    },
+    [requiredRole]
+  );
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (!user && !localStorage.getItem('auth_token')) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    if (user && !hasRole(user)) {
+      navigate('/', { replace: true });
+    }
+  }, [user, isLoading, navigate, hasRole]);
+
+  return {
+    user: user ?? null,
+    isLoading,
+    hasRole: hasRole(user),
+  };
+}

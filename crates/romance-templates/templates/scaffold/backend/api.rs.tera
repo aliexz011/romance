@@ -1,0 +1,82 @@
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Serialize;
+
+use crate::pagination::PageMeta;
+
+#[derive(Debug, Serialize)]
+pub struct ApiResponse<T: Serialize> {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<ResponseMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ApiError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResponseMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<PageMeta>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApiError {
+    pub code: String,
+    pub message: String,
+}
+
+impl<T: Serialize> ApiResponse<T> {
+    pub fn success(data: T) -> Self {
+        Self {
+            success: true,
+            data: Some(data),
+            meta: None,
+            error: None,
+        }
+    }
+
+    pub fn success_with_page(data: T, page: PageMeta) -> Self {
+        Self {
+            success: true,
+            data: Some(data),
+            meta: Some(ResponseMeta { page: Some(page) }),
+            error: None,
+        }
+    }
+}
+
+impl ApiResponse<()> {
+    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            data: None,
+            meta: None,
+            error: Some(ApiError {
+                code: code.into(),
+                message: message.into(),
+            }),
+        }
+    }
+}
+
+impl<T: Serialize> IntoResponse for ApiResponse<T> {
+    fn into_response(self) -> Response {
+        let status = if self.success {
+            StatusCode::OK
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        (status, Json(self)).into_response()
+    }
+}
+
+pub fn ok<T: Serialize>(data: T) -> ApiResponse<T> {
+    ApiResponse::success(data)
+}
+
+pub fn ok_page<T: Serialize>(data: T, page: PageMeta) -> ApiResponse<T> {
+    ApiResponse::success_with_page(data, page)
+}

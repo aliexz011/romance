@@ -1,0 +1,25 @@
+{
+  "common": {
+    "success": "Успешно",
+    "error": "Ошибка",
+    "not_found": "Ресурс не найден",
+    "unauthorized": "Не авторизован",
+    "forbidden": "Доступ запрещён",
+    "validation_error": "Ошибка валидации",
+    "internal_error": "Внутренняя ошибка сервера",
+    "created": "Успешно создано",
+    "updated": "Успешно обновлено",
+    "deleted": "Успешно удалено"
+  },
+  "auth": {
+    "login_success": "Вход выполнен успешно",
+    "login_failed": "Неверный email или пароль",
+    "register_success": "Регистрация прошла успешно",
+    "token_expired": "Токен истёк",
+    "token_invalid": "Недействительный токен"
+  },
+  "pagination": {
+    "invalid_page": "Неверный номер страницы",
+    "invalid_per_page": "Неверное значение per_page"
+  }
+}

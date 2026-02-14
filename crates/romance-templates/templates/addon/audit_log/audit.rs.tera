@@ -1,0 +1,72 @@
+use sea_orm::*;
+use serde_json::Value as JsonValue;
+use uuid::Uuid;
+
+use crate::entities::audit_entry;
+
+/// The audit logger records create/update/delete operations.
+pub struct AuditLogger;
+
+impl AuditLogger {
+    /// Log a create operation.
+    pub async fn log_create(
+        db: &DatabaseConnection,
+        entity_type: &str,
+        entity_id: Uuid,
+        user_id: Option<Uuid>,
+        data: &JsonValue,
+    ) -> Result<(), DbErr> {
+        let entry = audit_entry::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            entity_type: Set(entity_type.to_string()),
+            entity_id: Set(entity_id),
+            action: Set("create".to_string()),
+            user_id: Set(user_id),
+            changes: Set(Some(data.clone())),
+            created_at: Set(chrono::Utc::now().fixed_offset()),
+        };
+        entry.insert(db).await?;
+        Ok(())
+    }
+
+    /// Log an update operation with before/after diff.
+    pub async fn log_update(
+        db: &DatabaseConnection,
+        entity_type: &str,
+        entity_id: Uuid,
+        user_id: Option<Uuid>,
+        changes: &JsonValue,
+    ) -> Result<(), DbErr> {
+        let entry = audit_entry::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            entity_type: Set(entity_type.to_string()),
+            entity_id: Set(entity_id),
+            action: Set("update".to_string()),
+            user_id: Set(user_id),
+            changes: Set(Some(changes.clone())),
+            created_at: Set(chrono::Utc::now().fixed_offset()),
+        };
+        entry.insert(db).await?;
+        Ok(())
+    }
+
+    /// Log a delete operation.
+    pub async fn log_delete(
+        db: &DatabaseConnection,
+        entity_type: &str,
+        entity_id: Uuid,
+        user_id: Option<Uuid>,
+    ) -> Result<(), DbErr> {
+        let entry = audit_entry::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            entity_type: Set(entity_type.to_string()),
+            entity_id: Set(entity_id),
+            action: Set("delete".to_string()),
+            user_id: Set(user_id),
+            changes: Set(None),
+            created_at: Set(chrono::Utc::now().fixed_offset()),
+        };
+        entry.insert(db).await?;
+        Ok(())
+    }
+}

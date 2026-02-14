@@ -1,0 +1,53 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Add OAuth columns to users table
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
+                    .add_column(ColumnDef::new(Users::OauthProvider).string_len(50).null())
+                    .add_column(ColumnDef::new(Users::OauthId).string_len(255).null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index for fast OAuth lookups
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_users_oauth")
+                    .table(Users::Table)
+                    .col(Users::OauthProvider)
+                    .col(Users::OauthId)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
+                    .drop_column(Users::OauthProvider)
+                    .drop_column(Users::OauthId)
+                    .to_owned(),
+            )
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum Users {
+    Table,
+    OauthProvider,
+    OauthId,
+}

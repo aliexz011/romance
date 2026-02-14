@@ -1,0 +1,109 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Default)]
+pub struct PageRequest {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+    pub sort: Option<String>,
+    pub order: Option<String>,
+}
+
+impl PageRequest {
+    pub fn page(&self) -> u64 {
+        self.page.unwrap_or(1).max(1)
+    }
+
+    pub fn per_page(&self) -> u64 {
+        self.per_page.unwrap_or(20).clamp(1, 100)
+    }
+
+    pub fn offset(&self) -> u64 {
+        (self.page() - 1) * self.per_page()
+    }
+
+    pub fn order(&self) -> &str {
+        match self.order.as_deref() {
+            Some("asc") | Some("ASC") => "asc",
+            _ => "desc",
+        }
+    }
+
+    pub fn validated_sort(&self, allowed: &[&str], default: &str) -> String {
+        match &self.sort {
+            Some(s) if allowed.contains(&s.as_str()) => s.clone(),
+            _ => default.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PageMeta {
+    pub page: u64,
+    pub per_page: u64,
+    pub total: u64,
+    pub total_pages: u64,
+    pub has_next: bool,
+    pub has_prev: bool,
+}
+
+impl PageMeta {
+    pub fn new(page: u64, per_page: u64, total: u64) -> Self {
+        let total_pages = if total == 0 {
+            1
+        } else {
+            (total + per_page - 1) / per_page
+        };
+        Self {
+            page,
+            per_page,
+            total,
+            total_pages,
+            has_next: page < total_pages,
+            has_prev: page > 1,
+        }
+    }
+
+    pub fn from_request(req: &PageRequest, total: u64) -> Self {
+        Self::new(req.page(), req.per_page(), total)
+    }
+}
+
+/// Cursor-based pagination request.
+/// Use for large datasets where offset-based pagination is inefficient.
+///
+/// Usage: GET /api/entities?cursor=abc123&limit=20
+#[derive(Debug, Deserialize)]
+pub struct CursorRequest {
+    pub cursor: Option<String>,
+    pub limit: Option<u64>,
+}
+
+impl CursorRequest {
+    pub fn limit(&self) -> u64 {
+        self.limit.unwrap_or(20).min(100)
+    }
+
+    /// Decode the cursor string back to a UUID.
+    pub fn decode_cursor(&self) -> Option<uuid::Uuid> {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        self.cursor.as_ref().and_then(|c| {
+            URL_SAFE_NO_PAD.decode(c).ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        })
+    }
+}
+
+/// Encode a UUID into a cursor string.
+pub fn encode_cursor(id: uuid::Uuid) -> String {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    URL_SAFE_NO_PAD.encode(id.to_string().as_bytes())
+}
+
+/// Cursor pagination response metadata.
+#[derive(Debug, Serialize)]
+pub struct CursorMeta {
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    pub limit: u64,
+}

@@ -1,0 +1,34 @@
+use axum::{routing::{delete, get, post, put}, Router};
+
+use crate::handlers::{{ entity_name_snake }};
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    // Public routes: list and get are accessible without authentication
+    let public_routes = Router::new()
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}", get({{ entity_name_snake }}::list))
+{% if has_searchable_fields %}        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/search", get({{ entity_name_snake }}::search))
+{% endif %}        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}", get({{ entity_name_snake }}::get))
+        ;
+
+    // Protected routes: create, update, delete require authentication
+    // When auth is not installed, these are still accessible without auth
+    // (the handler-level AuthUser extractor enforces auth when present)
+    let protected_routes = Router::new()
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}", post({{ entity_name_snake }}::create))
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/bulk", post({{ entity_name_snake }}::bulk_create).delete({{ entity_name_snake }}::bulk_delete))
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}", put({{ entity_name_snake }}::update))
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}", delete({{ entity_name_snake }}::delete))
+{% if soft_delete %}        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}/restore", post({{ entity_name_snake }}::restore))
+        .route("{{ api_prefix }}/{{ entity_name_snake | plural }}/{id}/permanent", delete({{ entity_name_snake }}::force_delete))
+{% endif %}        ;
+
+    // === ROMANCE:ROUTE_GUARDS ===
+
+    public_routes
+        .merge(protected_routes)
+// === ROMANCE:RELATION_ROUTES ===
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

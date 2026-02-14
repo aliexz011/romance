@@ -1,0 +1,197 @@
+import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { use{{ entity_name | plural }}, useDelete{{ entity_name }} } from './hooks';
+import type { {{ entity_name }} } from './types';
+import type { {{ entity_name }}ListParams } from './api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+{% if has_status_field %}import { Badge } from '@/components/ui/badge';
+{% endif %}
+
+export default function {{ entity_name }}List() {
+  const [page, setPage] = useState(1);
+  const [sortField, setSortField] = useState<string>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [filters, setFilters] = useState<Record<string, string>>({});
+
+  const params = useMemo<{{ entity_name }}ListParams>(() => {
+    const p: {{ entity_name }}ListParams = {
+      page,
+      sort: sortField,
+      order: sortOrder,
+    };
+    // Apply field filters
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) p[key] = value;
+    });
+    return p;
+  }, [page, sortField, sortOrder, filters]);
+
+  const { data, isLoading, error } = use{{ entity_name | plural }}(params);
+  const deleteMutation = useDelete{{ entity_name }}();
+
+  if (isLoading) return <div className="flex items-center justify-center p-8 text-muted-foreground">Loading...</div>;
+  if (error) return <div className="p-4 text-destructive">Error: {error.message}</div>;
+
+  const handleDelete = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this item?')) {
+      deleteMutation.mutate(id);
+    }
+  };
+
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+    setPage(1);
+  };
+
+  const handleFilterChange = (field: string, value: string) => {
+    setFilters((prev) => ({ ...prev, [field]: value }));
+    setPage(1);
+  };
+
+  const sortIndicator = (field: string) => {
+    if (sortField !== field) return '';
+    return sortOrder === 'asc' ? ' \u2191' : ' \u2193';
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">{{ entity_name | plural }}</h2>
+          <p className="text-muted-foreground">
+            Manage your {{ entity_name_snake | plural }} here.
+          </p>
+        </div>
+        <Button asChild>
+          <Link to="/{{ entity_name_snake | plural }}/new">Create {{ entity_name }}</Link>
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid grid-cols-1 md:grid-cols-{{ fields | length }} gap-2">
+{% for field in fields %}{% if field.filter_method is defined and field.filter_method != "skip" %}            <Input
+              placeholder="Filter {{ field.name | title_case }}..."
+              value={filters['{{ field.name }}'] ?? ''}
+              onChange={(e) => handleFilterChange('{{ field.name }}', e.target.value)}
+            />
+{% endif %}{% endfor %}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+{% for field in fields %}
+{% if field.relation %}                <TableHead
+                  className="cursor-pointer select-none hover:text-foreground"
+                  onClick={() => handleSort('{{ field.name }}')}
+                >
+                  {{ field.relation }}{sortIndicator('{{ field.name }}')}
+                </TableHead>
+{% else %}                <TableHead
+                  className="cursor-pointer select-none hover:text-foreground"
+                  onClick={() => handleSort('{{ field.name }}')}
+                >
+                  {{ field.name | title_case }}{sortIndicator('{{ field.name }}')}
+                </TableHead>
+{% endif %}
+{% endfor %}
+                <TableHead className="w-[100px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data?.data.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={{ "{" }}{{ fields | length }} + 1} className="h-24 text-center text-muted-foreground">
+                    No {{ entity_name_snake | plural }} found.
+                  </TableCell>
+                </TableRow>
+              )}
+              {data?.data.map((item: {{ entity_name }}) => (
+                <TableRow key={item.id}>
+{% for field in fields %}
+{% if field.name == "status" %}                  <TableCell>
+                    <Badge variant="outline">{String(item.{{ field.name }}{% if field.optional %} ?? ''{% endif %})}</Badge>
+                  </TableCell>
+{% else %}                  <TableCell>
+                    <Link to={`/{{ entity_name_snake | plural }}/${item.id}`} className="hover:underline">
+                      {String(item.{{ field.name }}{% if field.optional %} ?? ''{% endif %}){% if field.name == "id" %}.slice(0, 8) + '...'{% endif %}}
+                    </Link>
+                  </TableCell>
+{% endif %}
+{% endfor %}
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link to={`/{{ entity_name_snake | plural }}/${item.id}/edit`}>Edit</Link>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(item.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {data && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Showing {data.data.length} of {data.meta.total} results
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={!data.meta.has_prev}
+            >
+              Previous
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {data.meta.page} of {data.meta.total_pages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={!data.meta.has_next}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

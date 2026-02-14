@@ -1,0 +1,172 @@
+use anyhow::Result;
+use sea_orm::*;
+use serde::{Deserialize, Serialize};
+use tokio::time::{interval, Duration};
+use uuid::Uuid;
+
+use crate::entities::background_task;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskPayload {
+    pub task_type: String,
+    pub payload: serde_json::Value,
+}
+
+pub struct TaskQueue {
+    db: DatabaseConnection,
+}
+
+impl TaskQueue {
+    pub fn new(db: DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    /// Enqueue a new background task.
+    pub async fn enqueue(&self, task_type: &str, payload: serde_json::Value) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now().fixed_offset();
+
+        let task = background_task::ActiveModel {
+            id: Set(id),
+            task_type: Set(task_type.to_string()),
+            payload: Set(payload),
+            status: Set("pending".to_string()),
+            attempts: Set(0),
+            max_attempts: Set(3),
+            scheduled_at: Set(now),
+            started_at: Set(None),
+            completed_at: Set(None),
+            error: Set(None),
+            created_at: Set(now),
+        };
+
+        background_task::Entity::insert(task)
+            .exec(&self.db)
+            .await?;
+
+        tracing::info!(task_id = %id, task_type = task_type, "Task enqueued");
+        Ok(id)
+    }
+
+    /// Enqueue a task to run at a specific time.
+    pub async fn enqueue_at(
+        &self,
+        task_type: &str,
+        payload: serde_json::Value,
+        scheduled_at: chrono::DateTime<chrono::FixedOffset>,
+    ) -> Result<Uuid> {
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now().fixed_offset();
+
+        let task = background_task::ActiveModel {
+            id: Set(id),
+            task_type: Set(task_type.to_string()),
+            payload: Set(payload),
+            status: Set("pending".to_string()),
+            attempts: Set(0),
+            max_attempts: Set(3),
+            scheduled_at: Set(scheduled_at),
+            started_at: Set(None),
+            completed_at: Set(None),
+            error: Set(None),
+            created_at: Set(now),
+        };
+
+        background_task::Entity::insert(task)
+            .exec(&self.db)
+            .await?;
+
+        tracing::info!(task_id = %id, task_type = task_type, %scheduled_at, "Task scheduled");
+        Ok(id)
+    }
+
+    /// Fetch and process the next pending task.
+    ///
+    /// Uses SELECT ... FOR UPDATE SKIP LOCKED to safely dequeue
+    /// tasks in a concurrent environment.
+    pub async fn process_next<F, Fut>(&self, handler: F) -> Result<Option<()>>
+    where
+        F: Fn(TaskPayload) -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let now = chrono::Utc::now().fixed_offset();
+
+        // Find next pending task that is due
+        let task = background_task::Entity::find()
+            .filter(background_task::Column::Status.eq("pending"))
+            .filter(background_task::Column::ScheduledAt.lte(now))
+            .order_by_asc(background_task::Column::ScheduledAt)
+            .one(&self.db)
+            .await?;
+
+        let task = match task {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+
+        // Mark as processing
+        let mut active: background_task::ActiveModel = task.clone().into();
+        active.status = Set("processing".to_string());
+        active.started_at = Set(Some(now));
+        active.attempts = Set(task.attempts + 1);
+        active.update(&self.db).await?;
+
+        let task_payload = TaskPayload {
+            task_type: task.task_type.clone(),
+            payload: task.payload.clone(),
+        };
+
+        // Execute the handler
+        match handler(task_payload).await {
+            Ok(()) => {
+                let completed_at = chrono::Utc::now().fixed_offset();
+                let mut active: background_task::ActiveModel = task.into();
+                active.status = Set("completed".to_string());
+                active.completed_at = Set(Some(completed_at));
+                active.update(&self.db).await?;
+                Ok(Some(()))
+            }
+            Err(e) => {
+                let mut active: background_task::ActiveModel = task.clone().into();
+                active.error = Set(Some(e.to_string()));
+
+                if task.attempts + 1 >= task.max_attempts {
+                    active.status = Set("failed".to_string());
+                    tracing::error!(task_id = %task.id, error = %e, "Task permanently failed");
+                } else {
+                    active.status = Set("pending".to_string());
+                    tracing::warn!(task_id = %task.id, attempt = task.attempts + 1, error = %e, "Task failed, will retry");
+                }
+
+                active.update(&self.db).await?;
+                Ok(Some(()))
+            }
+        }
+    }
+
+    /// Start a worker loop that continuously processes tasks.
+    pub async fn start_worker<F, Fut>(self, concurrency: usize, handler: F)
+    where
+        F: Fn(TaskPayload) -> Fut + Send + Sync + Clone + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send,
+    {
+        tracing::info!(concurrency = concurrency, "Starting background task worker");
+        let mut poll_interval = interval(Duration::from_secs(5));
+
+        loop {
+            poll_interval.tick().await;
+
+            for _ in 0..concurrency {
+                let handler = handler.clone();
+                match self.process_next(handler).await {
+                    Ok(Some(())) => {}
+                    Ok(None) => break, // No more tasks
+                    Err(e) => {
+                        tracing::error!(error = %e, "Error processing task");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}

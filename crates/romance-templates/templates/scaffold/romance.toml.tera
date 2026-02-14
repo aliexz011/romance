@@ -1,0 +1,21 @@
+[project]
+name = "{{ project_name }}"
+
+[backend]
+port = 3001
+database_url = "postgres://localhost/{{ project_name_snake }}"
+
+[frontend]
+port = 5173
+api_base_url = "http://localhost:3001"
+
+[codegen]
+generate_openapi = true
+generate_ts_types = true
+
+[features]
+# Enable with: romance add <feature>
+# validation = true
+# soft_delete = true
+# audit_log = true
+# search = true

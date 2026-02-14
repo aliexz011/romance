@@ -1,0 +1,80 @@
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::State;
+use axum::response::Response;
+use std::sync::Arc;
+use tokio::sync::broadcast;
+
+use crate::events::{EntityEvent, EventBus};
+
+#[derive(Clone)]
+pub struct WebSocketState {
+    pub tx: broadcast::Sender<String>,
+}
+
+impl WebSocketState {
+    pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(100);
+        Self { tx }
+    }
+}
+
+impl Default for WebSocketState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<crate::routes::AppState>,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(mut socket: WebSocket, state: crate::routes::AppState) {
+    let mut rx = state.ws.tx.subscribe();
+
+    loop {
+        tokio::select! {
+            // Broadcast messages to client
+            Ok(msg) = rx.recv() => {
+                if socket.send(Message::Text(msg.into())).await.is_err() {
+                    break;
+                }
+            }
+            // Receive messages from client
+            Some(Ok(msg)) = socket.recv() => {
+                if let Message::Text(text) = msg {
+                    let _ = state.ws.tx.send(text.to_string());
+                }
+            }
+            else => break,
+        }
+    }
+}
+
+/// Broadcast a message to all connected WebSocket clients.
+pub fn broadcast(state: &crate::routes::AppState, message: &str) {
+    let _ = state.ws.tx.send(message.to_string());
+}
+
+/// Subscribe to the EventBus and forward entity events to WebSocket clients.
+///
+/// Call this once at startup (e.g. via `tokio::spawn`) to bridge the
+/// internal event system with connected WebSocket clients.
+pub async fn bridge_events(event_bus: EventBus, ws_state: WebSocketState) {
+    let mut rx = event_bus.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(event) => {
+                if let Ok(json) = serde_json::to_string(&event) {
+                    let _ = ws_state.tx.send(json);
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!("WebSocket event bridge lagged, skipped {} events", n);
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}

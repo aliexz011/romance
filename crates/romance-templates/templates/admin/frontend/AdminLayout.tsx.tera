@@ -1,0 +1,74 @@
+import { Outlet, NavLink } from 'react-router-dom';
+import { useAuth } from '@/features/auth/AuthContext';
+
+export default function AdminLayout() {
+  const { user, logout } = useAuth();
+
+  return (
+    <div className="flex h-screen bg-background">
+      {/* Sidebar */}
+      <aside className="w-64 shrink-0 border-r bg-muted/30">
+        <div className="flex h-16 items-center border-b px-6">
+          <h2 className="text-lg font-semibold">{{ project_name }}</h2>
+        </div>
+        <nav className="flex flex-col gap-1 p-4">
+          <NavLink
+            to="/admin"
+            end
+            className={({ isActive }) =>
+              `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              }`
+            }
+          >
+            Dashboard
+          </NavLink>
+{% for entity in entities %}
+          <NavLink
+            to="/admin/{{ entity.name_snake | plural }}"
+            className={({ isActive }) =>
+              `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                isActive
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              }`
+            }
+          >
+            {{ entity.name | plural }}
+          </NavLink>
+{% endfor %}
+          {/* === ROMANCE:ADMIN_NAV === */}
+        </nav>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Header */}
+        <header className="flex h-16 items-center justify-between border-b px-6">
+          <h1 className="text-xl font-semibold">Admin Panel</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">
+              {user?.email}
+            </span>
+            <button
+              onClick={logout}
+              className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+            >
+              Logout
+            </button>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-y-auto p-6">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

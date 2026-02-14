@@ -1,0 +1,90 @@
+import { useQuery } from '@tanstack/react-query';
+
+interface DashboardData {
+  entity_counts: Record<string, number>;
+  endpoints: Array<{
+    entity: string;
+    list: string;
+    create: string;
+    get: string;
+    update: string;
+    delete: string;
+  }>;
+}
+
+export default function DevDashboard() {
+  const { data, isLoading } = useQuery<{ success: boolean; data: DashboardData }>({
+    queryKey: ['dev-dashboard'],
+    queryFn: () => fetch('/api/dev/dashboard').then((r) => r.json()),
+  });
+
+  if (isLoading) return <p>Loading dashboard...</p>;
+
+  const dashboard = data?.data;
+
+  return (
+    <div className="space-y-8 p-6">
+      <div>
+        <h1 className="text-3xl font-bold">Developer Dashboard</h1>
+        <p className="text-muted-foreground">Development-only overview of your Romance project.</p>
+      </div>
+
+      {/* Entity Counts */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold">Entity Counts</h2>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {dashboard &&
+            Object.entries(dashboard.entity_counts).map(([name, count]) => (
+              <div key={name} className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">{name}</p>
+                <p className="text-2xl font-bold">{count}</p>
+              </div>
+            ))}
+        </div>
+      </section>
+
+      {/* API Endpoints */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold">API Endpoints</h2>
+        <div className="rounded-md border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="p-3 text-left">Entity</th>
+                <th className="p-3 text-left">List</th>
+                <th className="p-3 text-left">Create</th>
+                <th className="p-3 text-left">Get</th>
+                <th className="p-3 text-left">Update</th>
+                <th className="p-3 text-left">Delete</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dashboard?.endpoints.map((ep) => (
+                <tr key={ep.entity} className="border-b">
+                  <td className="p-3 font-medium">{ep.entity}</td>
+                  <td className="p-3 font-mono text-xs">{ep.list}</td>
+                  <td className="p-3 font-mono text-xs">{ep.create}</td>
+                  <td className="p-3 font-mono text-xs">{ep.get}</td>
+                  <td className="p-3 font-mono text-xs">{ep.update}</td>
+                  <td className="p-3 font-mono text-xs">{ep.delete}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+{% if has_audit %}
+      {/* Quick Links */}
+      <section>
+        <h2 className="mb-4 text-xl font-semibold">Quick Links</h2>
+        <div className="flex gap-4">
+          <a href="/admin/audit-log" className="rounded-md border px-4 py-2 text-sm hover:bg-accent">
+            Audit Log
+          </a>
+        </div>
+      </section>
+{% endif %}
+    </div>
+  );
+}

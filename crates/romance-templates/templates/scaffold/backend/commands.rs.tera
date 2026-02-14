@@ -1,0 +1,11 @@
+use anyhow::Result;
+use sea_orm::DatabaseConnection;
+
+// === ROMANCE:COMMANDS ===
+
+pub fn run_command(name: &str, args: &[String], db: &DatabaseConnection) -> Result<()> {
+    match name {
+        // === ROMANCE:COMMAND_MATCH ===
+        _ => anyhow::bail!("Unknown command: {}. Available commands: none registered yet.", name),
+    }
+}

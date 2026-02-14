@@ -1,0 +1,197 @@
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+{% if has_validation %}use validator::Validate;
+{% endif %}
+{% if has_regex_validations %}use once_cell::sync::Lazy;
+use regex::Regex;
+{% for field in fields -%}
+{% for v in field.validations -%}
+{% if v.type == "regex" %}
+static RE_{{ field.name | upper }}: Lazy<Regex> = Lazy::new(|| Regex::new(r"{{ v.value }}").unwrap());
+{% endif -%}
+{% endfor -%}
+{% endfor -%}
+{% endif %}
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize, utoipa::ToSchema)]
+#[sea_orm(table_name = "{{ entity_name_snake | plural }}")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: Uuid,
+{% for field in fields -%}
+{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
+{% endfor %}    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
+{% if soft_delete %}    pub deleted_at: Option<DateTimeWithTimeZone>,
+{% endif %}
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {
+{% for field in fields -%}
+{% if field.relation %}    #[sea_orm(
+        belongs_to = "super::{{ field.relation | snake_case }}::Entity",
+        from = "Column::{{ field.name | pascal_case }}",
+        to = "super::{{ field.relation | snake_case }}::Column::Id"
+    )]
+    {{ field.relation }},
+{% endif -%}
+{% endfor %}}
+
+{% for field in fields -%}
+{% if field.relation %}
+impl Related<super::{{ field.relation | snake_case }}::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::{{ field.relation }}.def()
+    }
+}
+{% endif -%}
+{% endfor %}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+// === ROMANCE:RELATIONS ===
+
+{% if has_validation %}
+#[derive(Debug, Serialize, Deserialize, Validate, utoipa::ToSchema)]
+{% else %}
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+{% endif %}
+pub struct Create{{ entity_name }} {
+{% for field in fields -%}
+{% if has_validation %}{% for v in field.validations -%}
+{% if v.type == "min" and v.value is defined %}{% if field.rust_type == "String" %}    #[validate(length(min = {{ v.value }}))]
+{% else %}    #[validate(range(min = {{ v.value }}))]
+{% endif %}{% endif -%}
+{% if v.type == "max" and v.value is defined %}{% if field.rust_type == "String" %}    #[validate(length(max = {{ v.value }}))]
+{% else %}    #[validate(range(max = {{ v.value }}))]
+{% endif %}{% endif -%}
+{% if v.type == "email" %}    #[validate(email)]
+{% endif -%}
+{% if v.type == "url" %}    #[validate(url)]
+{% endif -%}
+{% if v.type == "regex" %}    #[validate(regex(path = *RE_{{ field.name | upper }}))]
+{% endif -%}
+{% if v.type == "required" %}{% if field.rust_type == "String" %}    #[validate(length(min = 1))]
+{% endif %}{% endif -%}
+{% endfor -%}
+{% endif -%}
+{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
+{% endfor %}}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Update{{ entity_name }} {
+{% for field in fields %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% endfor %}}
+
+/// API response DTO — controls which fields are exposed.
+/// Customize in the ROMANCE:CUSTOM block below.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct {{ entity_name }}Response {
+    pub id: Uuid,
+{% for field in fields %}
+{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% endif %}
+{% endfor %}
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
+}
+
+impl From<Model> for {{ entity_name }}Response {
+    fn from(m: Model) -> Self {
+        Self {
+            id: m.id,
+{% for field in fields %}
+            {{ field.name }}: m.{{ field.name }},
+{% endfor %}
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
+    }
+}
+
+{% if has_restricted_fields %}
+impl {{ entity_name }}Response {
+    /// Filter fields based on user role.
+    /// Returns a JSON value with restricted fields removed for unauthorized users.
+    pub fn filter_for_role(self, role: Option<&str>, is_authenticated: bool) -> serde_json::Value {
+        let mut value = serde_json::to_value(&self).unwrap_or_default();
+        if let Some(obj) = value.as_object_mut() {
+            {% for field in fields %}
+            {% if field.visibility == "authenticated" %}
+            if !is_authenticated {
+                obj.remove("{{ field.name }}");
+            }
+            {% elif field.visibility == "admin_only" %}
+            if role != Some("admin") {
+                obj.remove("{{ field.name }}");
+            }
+            {% elif field.visibility == "roles" %}
+            {
+                let allowed_roles = vec![{% for r in field.visibility_roles %}"{{ r }}"{% if not loop.last %}, {% endif %}{% endfor %}];
+                if !role.map(|r| allowed_roles.contains(&r)).unwrap_or(false) {
+                    obj.remove("{{ field.name }}");
+                }
+            }
+            {% endif %}
+            {% endfor %}
+        }
+        value
+    }
+}
+{% endif %}
+
+{% if has_belongs_to %}
+/// Detailed response with nested related entities.
+/// Used when `?include=` query parameter is specified on single-item GET.
+#[derive(Debug, Serialize)]
+pub struct {{ entity_name }}DetailResponse {
+    pub id: Uuid,
+{% for field in fields %}
+{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% endif %}
+{% endfor %}
+    // Nested relations (populated via ?include=)
+{% for rel in belongs_to_relations %}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{ rel.target_snake }}: Option<serde_json::Value>,
+{% endfor %}
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
+}
+
+impl From<Model> for {{ entity_name }}DetailResponse {
+    fn from(m: Model) -> Self {
+        Self {
+            id: m.id,
+{% for field in fields %}
+            {{ field.name }}: m.{{ field.name }},
+{% endfor %}
+{% for rel in belongs_to_relations %}
+            {{ rel.target_snake }}: None,
+{% endfor %}
+            created_at: m.created_at,
+            updated_at: m.updated_at,
+        }
+    }
+}
+{% endif %}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkCreate{{ entity_name }} {
+    pub items: Vec<Create{{ entity_name }}>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkDelete {
+    pub ids: Vec<Uuid>,
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

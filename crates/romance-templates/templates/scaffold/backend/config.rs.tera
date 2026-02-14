@@ -1,0 +1,18 @@
+use anyhow::Result;
+
+pub struct AppConfig {
+    pub port: u16,
+    pub database_url: String,
+}
+
+impl AppConfig {
+    pub fn from_env() -> Result<Self> {
+        let port = std::env::var("PORT")
+            .unwrap_or_else(|_| "3001".to_string())
+            .parse()?;
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://localhost/{{ project_name_snake }}".to_string());
+
+        Ok(Self { port, database_url })
+    }
+}

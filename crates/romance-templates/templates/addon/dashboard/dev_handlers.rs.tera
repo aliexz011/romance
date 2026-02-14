@@ -1,0 +1,54 @@
+use axum::extract::State;
+use sea_orm::*;
+
+use crate::api::{ok, ApiResponse};
+use crate::errors::AppResult;
+use crate::routes::AppState;
+
+/// Developer dashboard data.
+/// GET /api/dev/dashboard
+pub async fn dashboard(
+    State(state): State<AppState>,
+) -> AppResult<ApiResponse<serde_json::Value>> {
+    let mut entity_counts = serde_json::Map::new();
+
+{% for entity in entities %}
+    let {{ entity.name_snake }}_count = crate::entities::{{ entity.name_snake }}::Entity::find()
+        .count(&state.db)
+        .await
+        .unwrap_or(0);
+    entity_counts.insert("{{ entity.name_snake }}".to_string(), serde_json::json!({{ entity.name_snake }}_count));
+{% endfor %}
+
+{% if has_auth %}
+    let user_count = crate::entities::user::Entity::find()
+        .count(&state.db)
+        .await
+        .unwrap_or(0);
+    entity_counts.insert("users".to_string(), serde_json::json!(user_count));
+{% endif %}
+
+{% if has_audit %}
+    let audit_count = crate::entities::audit_entry::Entity::find()
+        .count(&state.db)
+        .await
+        .unwrap_or(0);
+    entity_counts.insert("audit_entries".to_string(), serde_json::json!(audit_count));
+{% endif %}
+
+    Ok(ok(serde_json::json!({
+        "entity_counts": entity_counts,
+        "endpoints": [
+{% for entity in entities %}
+            {
+                "entity": "{{ entity.name }}",
+                "list": "/api/{{ entity.name_snake }}s",
+                "create": "POST /api/{{ entity.name_snake }}s",
+                "get": "/api/{{ entity.name_snake }}s/{id}",
+                "update": "PUT /api/{{ entity.name_snake }}s/{id}",
+                "delete": "DELETE /api/{{ entity.name_snake }}s/{id}",
+            },
+{% endfor %}
+        ],
+    })))
+}

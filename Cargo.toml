@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/romance-cli",
+    "crates/romance-core",
+    "crates/romance-templates",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license-file = "LICENSE"
+repository = "https://github.com/AliExpress/romance"
+homepage = "https://romance.dev"
+authors = ["Romance Team <team@romance.dev>"]

@@ -1,0 +1,108 @@
+import { useState, useCallback } from 'react';
+
+interface FileUploadProps {
+  onUpload: (url: string) => void;
+  accept?: string;
+  maxSize?: number;
+  label?: string;
+  imageOnly?: boolean;
+}
+
+export default function FileUpload({
+  onUpload,
+  accept,
+  maxSize = 10 * 1024 * 1024,
+  label = 'Upload file',
+  imageOnly = false,
+}: FileUploadProps) {
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleUpload = useCallback(
+    async (file: File) => {
+      setError(null);
+
+      if (file.size > maxSize) {
+        setError(`File too large. Maximum size: ${Math.round(maxSize / 1024 / 1024)}MB`);
+        return;
+      }
+
+      if (imageOnly && !file.type.startsWith('image/')) {
+        setError('Please upload an image file');
+        return;
+      }
+
+      setUploading(true);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const endpoint = imageOnly ? '/api/upload/image' : '/api/upload';
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          onUpload(result.data.url);
+          if (file.type.startsWith('image/')) {
+            setPreview(result.data.url);
+          }
+        } else {
+          setError(result.error?.message || 'Upload failed');
+        }
+      } catch {
+        setError('Upload failed. Please try again.');
+      } finally {
+        setUploading(false);
+      }
+    },
+    [maxSize, imageOnly, onUpload]
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleUpload(file);
+    },
+    [handleUpload]
+  );
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium">{label}</label>
+      <div
+        className={`flex flex-col items-center justify-center rounded-md border-2 border-dashed p-6 transition-colors ${
+          dragOver ? 'border-primary bg-primary/5' : 'border-gray-300'
+        }`}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={handleDrop}
+      >
+        {preview && (
+          <img src={preview} alt="Preview" className="mb-2 h-24 w-24 rounded object-cover" />
+        )}
+        <p className="text-sm text-gray-500">
+          {uploading ? 'Uploading...' : 'Drag & drop or click to upload'}
+        </p>
+        <input
+          type="file"
+          accept={accept || (imageOnly ? 'image/*' : undefined)}
+          className="mt-2 text-sm"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+          disabled={uploading}
+        />
+      </div>
+      {error && <p className="text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}

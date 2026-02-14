@@ -1,0 +1,218 @@
+use anyhow::{Context, Result};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
+use axum::{
+    extract::FromRequestParts,
+    http::request::Parts,
+};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::errors::AppError;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Claims {
+    pub sub: String,
+    pub email: String,
+    pub role: String,
+    pub exp: usize,
+    pub iat: usize,
+}
+
+impl Claims {
+    /// Check if the user has a specific role.
+    pub fn has_role(&self, role: &str) -> bool {
+        self.role == role
+    }
+
+    /// Check if the user is an admin.
+    pub fn is_admin(&self) -> bool {
+        self.role == "admin"
+    }
+
+    /// Parse the user ID from the `sub` claim.
+    pub fn user_id(&self) -> Result<Uuid, AppError> {
+        self.sub
+            .parse::<Uuid>()
+            .map_err(|_| AppError::Unauthorized("Invalid user ID in token".into()))
+    }
+}
+
+pub fn create_token(user_id: Uuid, email: &str, role: &str) -> Result<String> {
+    let secret = std::env::var("JWT_SECRET").context("JWT_SECRET must be set")?;
+
+    let now = chrono::Utc::now();
+    let exp = (now + chrono::Duration::hours(24)).timestamp() as usize;
+    let iat = now.timestamp() as usize;
+
+    let claims = Claims {
+        sub: user_id.to_string(),
+        email: email.to_string(),
+        role: role.to_string(),
+        exp,
+        iat,
+    };
+
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .context("Failed to create token")?;
+
+    Ok(token)
+}
+
+pub fn verify_token(token: &str) -> Result<Claims> {
+    let secret = std::env::var("JWT_SECRET").context("JWT_SECRET must be set")?;
+
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &Validation::default(),
+    )
+    .context("Invalid token")?;
+
+    Ok(token_data.claims)
+}
+
+pub fn hash_password(password: &str) -> Result<String> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+
+    let hash = argon2
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
+        .to_string();
+
+    Ok(hash)
+}
+
+pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
+    let parsed_hash =
+        PasswordHash::new(hash).map_err(|e| anyhow::anyhow!("Invalid password hash: {}", e))?;
+
+    let result = Argon2::default().verify_password(password.as_bytes(), &parsed_hash);
+
+    Ok(result.is_ok())
+}
+
+/// Extractor that validates a Bearer JWT token and provides the claims.
+/// Returns 401 Unauthorized if no valid token is present.
+/// Use this for endpoints that require authentication.
+pub struct AuthUser(pub Claims);
+
+impl<S> FromRequestParts<S> for AuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get("Authorization")
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".into()))?;
+
+        let token = auth_header
+            .strip_prefix("Bearer ")
+            .ok_or_else(|| AppError::Unauthorized("Invalid Authorization header format".into()))?;
+
+        let claims = verify_token(token)
+            .map_err(|_| AppError::Unauthorized("Invalid or expired token".into()))?;
+
+        Ok(AuthUser(claims))
+    }
+}
+
+/// Extractor that optionally extracts the authenticated user from a JWT token.
+/// Returns `OptionalAuthUser(Some(claims))` if a valid token is present,
+/// or `OptionalAuthUser(None)` if no token is provided.
+/// Use this for endpoints that behave differently for authenticated vs anonymous users.
+pub struct OptionalAuthUser(pub Option<Claims>);
+
+impl<S> FromRequestParts<S> for OptionalAuthUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get("Authorization")
+            .and_then(|value| value.to_str().ok());
+
+        let Some(auth_header) = auth_header else {
+            return Ok(OptionalAuthUser(None));
+        };
+
+        let Some(token) = auth_header.strip_prefix("Bearer ") else {
+            return Ok(OptionalAuthUser(None));
+        };
+
+        match verify_token(token) {
+            Ok(claims) => Ok(OptionalAuthUser(Some(claims))),
+            Err(_) => Ok(OptionalAuthUser(None)),
+        }
+    }
+}
+
+/// Extractor that requires the authenticated user to have the "admin" role.
+/// Returns 401 if not authenticated, 403 if authenticated but not admin.
+pub struct AdminUser(pub Claims);
+
+impl<S> FromRequestParts<S> for AdminUser
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let AuthUser(claims) = AuthUser::from_request_parts(parts, state).await?;
+
+        if claims.role != "admin" {
+            return Err(AppError::Forbidden("Admin access required".into()));
+        }
+
+        Ok(AdminUser(claims))
+    }
+}
+
+/// Extractor that requires the authenticated user to have a specific role.
+/// Use `RequireRole::<"admin">` or build custom role extractors with `require_role()`.
+///
+/// For custom role checks, use the `require_role` helper function in handlers:
+/// ```rust
+/// pub async fn my_handler(auth: AuthUser) -> AppResult<...> {
+///     require_role(&auth.0, "editor")?;
+///     // ... handler logic
+/// }
+/// ```
+pub fn require_role(claims: &Claims, required_role: &str) -> Result<(), AppError> {
+    if claims.role != required_role && claims.role != "admin" {
+        return Err(AppError::Forbidden(format!(
+            "Role '{}' required, but user has role '{}'",
+            required_role, claims.role
+        )));
+    }
+    Ok(())
+}
+
+/// Check if the user has one of the allowed roles. Admin always passes.
+pub fn require_any_role(claims: &Claims, allowed_roles: &[&str]) -> Result<(), AppError> {
+    if claims.role == "admin" {
+        return Ok(());
+    }
+    if allowed_roles.contains(&claims.role.as_str()) {
+        return Ok(());
+    }
+    Err(AppError::Forbidden(format!(
+        "One of roles {:?} required, but user has role '{}'",
+        allowed_roles, claims.role
+    )))
+}

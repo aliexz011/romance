@@ -1,0 +1,69 @@
+use anyhow::Result;
+use redis::AsyncCommands;
+use serde::{de::DeserializeOwned, Serialize};
+
+pub struct CacheService {
+    client: redis::Client,
+}
+
+impl CacheService {
+    /// Create a new CacheService from the REDIS_URL environment variable.
+    pub fn new() -> Result<Self> {
+        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let client = redis::Client::open(redis_url)?;
+        Ok(Self { client })
+    }
+
+    /// Get a value from the cache, deserializing from JSON.
+    pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
+        let mut conn = self.client.get_multiplexed_async_connection().await.ok()?;
+        let value: Option<String> = conn.get(key).await.ok()?;
+        value.and_then(|v| serde_json::from_str(&v).ok())
+    }
+
+    /// Set a value in the cache with a TTL (in seconds), serializing to JSON.
+    pub async fn set<T: Serialize>(&self, key: &str, value: &T, ttl_secs: u64) -> Result<()> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let serialized = serde_json::to_string(value)?;
+        conn.set_ex(key, serialized, ttl_secs).await?;
+        Ok(())
+    }
+
+    /// Delete a key from the cache.
+    pub async fn delete(&self, key: &str) -> Result<()> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        conn.del(key).await?;
+        Ok(())
+    }
+
+    /// Invalidate all keys matching a pattern (e.g., "products:*").
+    ///
+    /// Uses SCAN to avoid blocking the server with KEYS.
+    pub async fn invalidate_pattern(&self, pattern: &str) -> Result<()> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut cursor: u64 = 0;
+        loop {
+            let (next_cursor, keys): (u64, Vec<String>) =
+                redis::cmd("SCAN")
+                    .arg(cursor)
+                    .arg("MATCH")
+                    .arg(pattern)
+                    .arg("COUNT")
+                    .arg(100)
+                    .query_async(&mut conn)
+                    .await?;
+
+            if !keys.is_empty() {
+                for key in &keys {
+                    let _: () = conn.del(key).await?;
+                }
+            }
+
+            cursor = next_cursor;
+            if cursor == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+}

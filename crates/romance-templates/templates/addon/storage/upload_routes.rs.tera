@@ -1,0 +1,9 @@
+use axum::{routing::post, Router};
+use crate::handlers::upload;
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/upload", post(upload::upload))
+        .route("/api/upload/image", post(upload::upload_image))
+}

@@ -1,0 +1,42 @@
+type Translations = Record<string, Record<string, string>>;
+
+const translations: Record<string, Translations> = {};
+
+export async function loadLocale(locale: string): Promise<void> {
+  if (translations[locale]) return;
+  try {
+    const response = await fetch(`/locales/${locale}.json`);
+    translations[locale] = await response.json();
+  } catch {
+    console.warn(`Failed to load locale: ${locale}`);
+  }
+}
+
+let currentLocale = navigator.language.split('-')[0] || 'en';
+
+export function setLocale(locale: string) {
+  currentLocale = locale;
+}
+
+export function getLocale(): string {
+  return currentLocale;
+}
+
+export function t(key: string, params?: Record<string, string>): string {
+  const keys = key.split('.');
+  let current: any = translations[currentLocale] || translations['en'] || {};
+
+  for (const k of keys) {
+    current = current?.[k];
+  }
+
+  let result = typeof current === 'string' ? current : key;
+
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      result = result.replace(`{${k}}`, v);
+    }
+  }
+
+  return result;
+}

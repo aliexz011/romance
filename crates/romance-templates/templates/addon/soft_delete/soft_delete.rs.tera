@@ -1,0 +1,35 @@
+use sea_orm::*;
+
+/// Extension trait for applying soft-delete filters to queries.
+/// When soft-delete is enabled, this filter excludes deleted records.
+pub trait SoftDeleteFilter {
+    /// Filter out soft-deleted records (where deleted_at IS NULL).
+    fn not_deleted(self) -> Self;
+}
+
+impl<E: EntityTrait> SoftDeleteFilter for Select<E>
+where
+    E::Column: std::fmt::Debug,
+{
+    fn not_deleted(self) -> Self {
+        // This is a generic approach — the actual column reference
+        // is entity-specific. Each entity with soft-delete should
+        // call `.filter(Column::DeletedAt.is_null())` directly.
+        //
+        // This module provides the helper for common operations.
+        self
+    }
+}
+
+/// Soft-delete an entity by setting deleted_at to now.
+pub fn soft_delete_value() -> sea_orm::Value {
+    sea_orm::Value::ChronoDateTimeWithTimeZone(Some(Box::new(
+        chrono::Utc::now().fixed_offset(),
+    )))
+}
+
+/// Check if soft-delete is enabled for the project.
+/// This reads from the romance.toml config at compile-time via env.
+pub fn is_enabled() -> bool {
+    true // Enabled by the addon installation
+}

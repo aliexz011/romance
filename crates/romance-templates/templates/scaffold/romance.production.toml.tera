@@ -1,0 +1,13 @@
+# Production overrides — values here override romance.toml
+# Activated by setting ROMANCE_ENV=production or [environment] active = "production"
+
+[backend]
+port = 8080
+
+[security]
+rate_limit_anon_rpm = 30
+rate_limit_auth_rpm = 120
+cors_origins = []
+
+[storage]
+backend = "s3"

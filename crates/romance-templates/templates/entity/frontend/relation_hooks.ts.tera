@@ -1,0 +1,61 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/utils';
+import type { {{ related_name }} } from '../{{ related_camel }}/types';
+
+const ENTITY_KEY = '{{ entity_name_snake | plural }}';
+const RELATION_KEY = '{{ related_snake | plural }}';
+
+export function use{{ entity_name }}{{ related_name }}s({{ entity_name_camel }}Id: string) {
+  return useQuery({
+    queryKey: [ENTITY_KEY, {{ entity_name_camel }}Id, RELATION_KEY],
+    queryFn: () =>
+      apiFetch<{{ related_name }}[]>(
+        `/${ENTITY_KEY}/${{ "{" }}{{ entity_name_camel }}Id}/${RELATION_KEY}`
+      ),
+    enabled: !!{{ entity_name_camel }}Id,
+  });
+}
+
+export function useAdd{{ related_name }}To{{ entity_name }}() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      {{ entity_name_camel }}Id,
+      {{ related_camel }}Id,
+    }: {
+      {{ entity_name_camel }}Id: string;
+      {{ related_camel }}Id: string;
+    }) =>
+      apiFetch<void>(
+        `/${ENTITY_KEY}/${{ "{" }}{{ entity_name_camel }}Id}/${RELATION_KEY}/${{ "{" }}{{ related_camel }}Id}`,
+        { method: 'POST' }
+      ),
+    onSuccess: (_, { {{ entity_name_camel }}Id }) => {
+      queryClient.invalidateQueries({
+        queryKey: [ENTITY_KEY, {{ entity_name_camel }}Id, RELATION_KEY],
+      });
+    },
+  });
+}
+
+export function useRemove{{ related_name }}From{{ entity_name }}() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      {{ entity_name_camel }}Id,
+      {{ related_camel }}Id,
+    }: {
+      {{ entity_name_camel }}Id: string;
+      {{ related_camel }}Id: string;
+    }) =>
+      apiFetch<void>(
+        `/${ENTITY_KEY}/${{ "{" }}{{ entity_name_camel }}Id}/${RELATION_KEY}/${{ "{" }}{{ related_camel }}Id}`,
+        { method: 'DELETE' }
+      ),
+    onSuccess: (_, { {{ entity_name_camel }}Id }) => {
+      queryClient.invalidateQueries({
+        queryKey: [ENTITY_KEY, {{ entity_name_camel }}Id, RELATION_KEY],
+      });
+    },
+  });
+}

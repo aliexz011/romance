@@ -1,0 +1,52 @@
+import { apiFetch, apiFetchPaginated } from '@/lib/utils';
+import type { {{ entity_name }}, Create{{ entity_name }}, Update{{ entity_name }} } from './types';
+
+const BASE_PATH = '/{{ entity_name_snake | plural }}';
+
+export interface {{ entity_name }}ListParams {
+  page?: number;
+  perPage?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+  [key: string]: string | number | undefined;
+}
+
+export const {{ entity_name_camel }}Api = {
+  list: (params: {{ entity_name }}ListParams = {}) => {
+    const { page = 1, perPage = 20, sort, order, ...filters } = params;
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(page));
+    searchParams.set('per_page', String(perPage));
+    if (sort) searchParams.set('sort', sort);
+    if (order) searchParams.set('order', order);
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    });
+    return apiFetchPaginated<{{ entity_name }}[]>(`${BASE_PATH}?${searchParams.toString()}`);
+  },
+
+  get: (id: string) =>
+    apiFetch<{{ entity_name }}>(`${BASE_PATH}/${id}`),
+
+  create: (data: Create{{ entity_name }}) =>
+    apiFetch<{{ entity_name }}>(BASE_PATH, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: string, data: Update{{ entity_name }}) =>
+    apiFetch<{{ entity_name }}>(`${BASE_PATH}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: string) =>
+    apiFetch<void>(`${BASE_PATH}/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

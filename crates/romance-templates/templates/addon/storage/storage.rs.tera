@@ -1,0 +1,78 @@
+use anyhow::Result;
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
+
+/// Trait for pluggable storage backends.
+#[async_trait::async_trait]
+pub trait StorageBackend: Send + Sync {
+    /// Store a file and return its public URL or path.
+    async fn store(&self, filename: &str, data: &[u8], content_type: &str) -> Result<String>;
+    /// Delete a file by its URL or path.
+    async fn delete(&self, url: &str) -> Result<()>;
+}
+
+/// Local filesystem storage backend.
+pub struct LocalStorage {
+    pub upload_dir: PathBuf,
+    pub base_url: String,
+}
+
+impl LocalStorage {
+    pub fn new(upload_dir: impl Into<PathBuf>, base_url: impl Into<String>) -> Self {
+        Self {
+            upload_dir: upload_dir.into(),
+            base_url: base_url.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StorageBackend for LocalStorage {
+    async fn store(&self, filename: &str, data: &[u8], _content_type: &str) -> Result<String> {
+        // Generate unique filename to prevent collisions
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin");
+        let unique_name = format!("{}.{}", Uuid::new_v4(), ext);
+
+        let file_path = self.upload_dir.join(&unique_name);
+        tokio::fs::create_dir_all(&self.upload_dir).await?;
+        tokio::fs::write(&file_path, data).await?;
+
+        Ok(format!("{}/{}", self.base_url.trim_end_matches('/'), unique_name))
+    }
+
+    async fn delete(&self, url: &str) -> Result<()> {
+        // Extract filename from URL
+        if let Some(filename) = url.rsplit('/').next() {
+            let file_path = self.upload_dir.join(filename);
+            if file_path.exists() {
+                tokio::fs::remove_file(&file_path).await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Validate that a file has an allowed MIME type for images.
+pub fn is_valid_image_type(content_type: &str) -> bool {
+    matches!(
+        content_type,
+        "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "image/svg+xml"
+    )
+}
+
+/// Parse a human-readable file size string like "10MB" into bytes.
+pub fn parse_file_size(s: &str) -> Option<usize> {
+    let s = s.trim().to_uppercase();
+    if let Some(num) = s.strip_suffix("GB") {
+        num.trim().parse::<usize>().ok().map(|n| n * 1024 * 1024 * 1024)
+    } else if let Some(num) = s.strip_suffix("MB") {
+        num.trim().parse::<usize>().ok().map(|n| n * 1024 * 1024)
+    } else if let Some(num) = s.strip_suffix("KB") {
+        num.trim().parse::<usize>().ok().map(|n| n * 1024)
+    } else {
+        s.parse::<usize>().ok()
+    }
+}

@@ -1,0 +1,137 @@
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+
+interface AuditEntry {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  action: string;
+  user_id: string | null;
+  changes: unknown;
+  created_at: string;
+}
+
+interface AuditLogResponse {
+  success: boolean;
+  data: AuditEntry[];
+  meta?: {
+    page: {
+      current: number;
+      per_page: number;
+      total: number;
+      total_pages: number;
+    };
+  };
+}
+
+export default function AuditLog() {
+  const [page, setPage] = useState(1);
+  const [entityType, setEntityType] = useState('');
+  const [action, setAction] = useState('');
+
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: '20',
+    ...(entityType && { entity_type: entityType }),
+    ...(action && { action }),
+  });
+
+  const { data, isLoading } = useQuery<AuditLogResponse>({
+    queryKey: ['audit-log', page, entityType, action],
+    queryFn: () =>
+      fetch(`/api/admin/audit-log?${params}`).then((r) => r.json()),
+  });
+
+  const actionColors: Record<string, string> = {
+    create: 'bg-green-100 text-green-800',
+    update: 'bg-blue-100 text-blue-800',
+    delete: 'bg-red-100 text-red-800',
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Audit Log</h2>
+
+      <div className="flex gap-4">
+        <input
+          type="text"
+          placeholder="Filter by entity type..."
+          value={entityType}
+          onChange={(e) => { setEntityType(e.target.value); setPage(1); }}
+          className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        />
+        <select
+          value={action}
+          onChange={(e) => { setAction(e.target.value); setPage(1); }}
+          className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="">All actions</option>
+          <option value="create">Create</option>
+          <option value="update">Update</option>
+          <option value="delete">Delete</option>
+        </select>
+      </div>
+
+      {isLoading ? (
+        <p>Loading...</p>
+      ) : (
+        <div className="rounded-md border">
+          <table className="w-full text-sm">
+            <thead className="border-b bg-muted/50">
+              <tr>
+                <th className="p-3 text-left">Timestamp</th>
+                <th className="p-3 text-left">Action</th>
+                <th className="p-3 text-left">Entity</th>
+                <th className="p-3 text-left">Entity ID</th>
+                <th className="p-3 text-left">User</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.data.map((entry) => (
+                <tr key={entry.id} className="border-b">
+                  <td className="p-3 text-muted-foreground">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </td>
+                  <td className="p-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${actionColors[entry.action] || 'bg-gray-100'}`}>
+                      {entry.action}
+                    </span>
+                  </td>
+                  <td className="p-3 font-medium">{entry.entity_type}</td>
+                  <td className="p-3 font-mono text-xs">{entry.entity_id.slice(0, 8)}...</td>
+                  <td className="p-3 font-mono text-xs">
+                    {entry.user_id ? `${entry.user_id.slice(0, 8)}...` : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {data?.meta?.page && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Page {data.meta.page.current} of {data.meta.page.total_pages} ({data.meta.page.total} entries)
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="rounded-md border px-3 py-1 text-sm disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => p + 1)}
+              disabled={page >= (data.meta.page.total_pages || 1)}
+              className="rounded-md border px-3 py-1 text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

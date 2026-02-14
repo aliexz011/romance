@@ -1,0 +1,70 @@
+import { Link, useParams } from 'react-router-dom';
+import { use{{ entity_name }} } from './hooks';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+{% if has_status_field %}import { Badge } from '@/components/ui/badge';
+{% endif %}import { Separator } from '@/components/ui/separator';
+
+export default function {{ entity_name }}Detail() {
+  const { id } = useParams<{ id: string }>();
+  const { data, isLoading, error } = use{{ entity_name }}(id ?? '');
+
+  if (isLoading) return <div className="flex items-center justify-center p-8 text-muted-foreground">Loading...</div>;
+  if (error) return <div className="p-4 text-destructive">Error: {error.message}</div>;
+  if (!data) return <div className="p-4 text-muted-foreground">Not found</div>;
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-3xl font-bold tracking-tight">{{ entity_name }} Details</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link to={`/{{ entity_name_snake | plural }}/${id}/edit`}>Edit</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/{{ entity_name_snake | plural }}">Back to list</Link>
+          </Button>
+        </div>
+      </div>
+
+      <Card>
+        <CardContent className="pt-6">
+          <dl className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <dt className="text-sm font-medium text-muted-foreground">ID</dt>
+              <dd className="col-span-2 text-sm font-mono">{data.id}</dd>
+            </div>
+            <Separator />
+{% for field in fields %}
+            <div className="grid grid-cols-3 gap-4">
+{% if field.relation %}              <dt className="text-sm font-medium text-muted-foreground">{{ field.relation }}</dt>
+{% else %}              <dt className="text-sm font-medium text-muted-foreground">{{ field.name | title_case }}</dt>
+{% endif %}
+{% if field.name == "status" %}              <dd className="col-span-2 text-sm">
+                <Badge variant="outline">{String(data.{{ field.name }}{% if field.optional %} ?? '—'{% endif %})}</Badge>
+              </dd>
+{% else %}              <dd className="col-span-2 text-sm">{String(data.{{ field.name }}{% if field.optional %} ?? '—'{% endif %})}</dd>
+{% endif %}
+            </div>
+{% if not loop.last %}            <Separator />
+{% endif %}
+{% endfor %}
+            <Separator />
+            <div className="grid grid-cols-3 gap-4">
+              <dt className="text-sm font-medium text-muted-foreground">Created</dt>
+              <dd className="col-span-2 text-sm">{new Date(data.created_at).toLocaleString()}</dd>
+            </div>
+            <Separator />
+            <div className="grid grid-cols-3 gap-4">
+              <dt className="text-sm font-medium text-muted-foreground">Updated</dt>
+              <dd className="col-span-2 text-sm">{new Date(data.updated_at).toLocaleString()}</dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

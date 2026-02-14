@@ -1,0 +1,15 @@
+[package]
+name = "romance-templates"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Embedded Tera templates for Romance CLI"
+keywords = ["templates", "tera", "code-generator"]
+categories = ["development-tools"]
+readme = "../../README.md"
+
+[dependencies]
+rust-embed = "8"

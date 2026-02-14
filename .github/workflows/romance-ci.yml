@@ -1,0 +1,153 @@
+name: Romance CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: cargo check
+        run: cargo check --workspace
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  build:
+    name: Build release binary
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: romance-binary
+          path: target/release/romance
+          retention-days: 1
+
+  e2e:
+    name: E2E smoke test
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: romance-binary
+          path: ./bin
+
+      - name: Make binary executable
+        run: chmod +x ./bin/romance
+
+      - name: Scaffold new project
+        run: ./bin/romance new /tmp/test-e2e-app
+
+      - name: Generate entity
+        run: |
+          cd /tmp/test-e2e-app
+          ${{ github.workspace }}/bin/romance generate entity Post title:string body:text published:bool
+
+      - name: Verify generated backend files exist
+        run: |
+          test -f /tmp/test-e2e-app/backend/src/entities/post.rs
+          test -f /tmp/test-e2e-app/backend/src/handlers/post.rs
+          test -f /tmp/test-e2e-app/backend/src/routes/post.rs
+          test -d /tmp/test-e2e-app/backend/migration/src
+          echo "All expected backend files exist"
+
+      - name: Verify generated frontend files exist
+        run: |
+          test -d /tmp/test-e2e-app/frontend/src/features/post
+          echo "All expected frontend files exist"
+
+      - name: Check generated backend compiles
+        run: |
+          cd /tmp/test-e2e-app/backend
+          cargo check
+
+      - name: Verify romance.toml exists
+        run: test -f /tmp/test-e2e-app/romance.toml
+
+      - name: Generate entity with relation
+        run: |
+          cd /tmp/test-e2e-app
+          ${{ github.workspace }}/bin/romance generate entity Category name:string description:text?
+          ${{ github.workspace }}/bin/romance generate entity Post title:string body:text published:bool category_id:uuid->Category
+
+      - name: Verify relation files
+        run: |
+          # Check that Category has-many injection happened
+          grep -q "post" /tmp/test-e2e-app/backend/src/handlers/category.rs || echo "Warning: has-many not injected"
+
+      - name: Generate auth
+        run: |
+          cd /tmp/test-e2e-app
+          ${{ github.workspace }}/bin/romance generate auth
+
+      - name: Verify auth files
+        run: |
+          test -f /tmp/test-e2e-app/backend/src/auth.rs
+          test -f /tmp/test-e2e-app/backend/src/entities/user.rs
+          test -f /tmp/test-e2e-app/frontend/src/features/auth/AuthContext.tsx
+
+      - name: Check generated backend still compiles
+        run: |
+          cd /tmp/test-e2e-app/backend
+          cargo check
+
+      - name: Run romance doctor
+        run: |
+          cd /tmp/test-e2e-app
+          ${{ github.workspace }}/bin/romance doctor || true

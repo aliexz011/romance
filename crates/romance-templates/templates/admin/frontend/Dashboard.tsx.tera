@@ -1,0 +1,31 @@
+import { Link } from 'react-router-dom';
+
+export default function Dashboard() {
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Dashboard</h2>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+{% for entity in entities %}
+        <Link
+          to="/admin/{{ entity.name_snake | plural }}"
+          className="group rounded-lg border bg-card p-6 shadow-sm transition-colors hover:border-primary"
+        >
+          <h3 className="text-lg font-semibold group-hover:text-primary">
+            {{ entity.name | plural }}
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage {{ entity.name_snake | plural }}
+          </p>
+          <span className="mt-4 inline-block text-sm font-medium text-primary">
+            Manage &rarr;
+          </span>
+        </Link>
+{% endfor %}
+      </div>
+    </div>
+  );
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

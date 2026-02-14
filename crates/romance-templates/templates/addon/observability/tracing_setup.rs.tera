@@ -1,0 +1,20 @@
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+/// Initialize the tracing subscriber with structured logging.
+/// Uses RUST_LOG environment variable for filtering (default: info).
+///
+/// To enable JSON output, add `"json"` to `tracing-subscriber` features
+/// in Cargo.toml and replace `.with(tracing_subscriber::fmt::layer()...)`
+/// with `.with(tracing_subscriber::fmt::layer().json()...)`.
+pub fn init_tracing() {
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true))
+        .init();
+}

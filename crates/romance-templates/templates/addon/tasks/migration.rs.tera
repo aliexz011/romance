@@ -1,0 +1,87 @@
+use sea_orm_migration::{prelude::*, schema::*};
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(BackgroundTask::Table)
+                    .if_not_exists()
+                    .col(pk_uuid(BackgroundTask::Id))
+                    .col(ColumnDef::new(BackgroundTask::TaskType).string_len(255).not_null())
+                    .col(ColumnDef::new(BackgroundTask::Payload).json_binary().not_null())
+                    .col(ColumnDef::new(BackgroundTask::Status).string_len(50).not_null().default("pending"))
+                    .col(ColumnDef::new(BackgroundTask::Attempts).integer().not_null().default(0))
+                    .col(ColumnDef::new(BackgroundTask::MaxAttempts).integer().not_null().default(3))
+                    .col(ColumnDef::new(BackgroundTask::ScheduledAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new(BackgroundTask::StartedAt).timestamp_with_time_zone().null())
+                    .col(ColumnDef::new(BackgroundTask::CompletedAt).timestamp_with_time_zone().null())
+                    .col(ColumnDef::new(BackgroundTask::Error).text().null())
+                    .col(ColumnDef::new(BackgroundTask::CreatedAt).timestamp_with_time_zone().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on status + scheduled_at for efficient task polling
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_background_tasks_status_scheduled")
+                    .table(BackgroundTask::Table)
+                    .col(BackgroundTask::Status)
+                    .col(BackgroundTask::ScheduledAt)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on task_type for filtering
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_background_tasks_task_type")
+                    .table(BackgroundTask::Table)
+                    .col(BackgroundTask::TaskType)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Index on created_at for chronological queries
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_background_tasks_created_at")
+                    .table(BackgroundTask::Table)
+                    .col(BackgroundTask::CreatedAt)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(BackgroundTask::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum BackgroundTask {
+    Table,
+    Id,
+    TaskType,
+    Payload,
+    Status,
+    Attempts,
+    MaxAttempts,
+    ScheduledAt,
+    StartedAt,
+    CompletedAt,
+    Error,
+    CreatedAt,
+}

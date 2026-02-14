@@ -1,0 +1,39 @@
+{% raw %}import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from './AuthContext';
+
+interface ProtectedRouteProps {
+  children?: React.ReactNode;
+  /** If specified, the user must have this role (or be admin) to access. */
+  requiredRole?: string;
+  /** Where to redirect if not authenticated. Defaults to "/login". */
+  redirectTo?: string;
+  /** Where to redirect if authenticated but lacking the required role. Defaults to "/". */
+  forbiddenRedirect?: string;
+}
+
+export default function ProtectedRoute({
+  children,
+  requiredRole,
+  redirectTo = '/login',
+  forbiddenRedirect = '/',
+}: ProtectedRouteProps) {
+  const { isAuthenticated, isLoading, hasRole } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[80vh] items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to={redirectTo} replace />;
+  }
+
+  if (requiredRole && !hasRole(requiredRole)) {
+    return <Navigate to={forbiddenRedirect} replace />;
+  }
+
+  return children ?? <Outlet />;
+}{% endraw %}

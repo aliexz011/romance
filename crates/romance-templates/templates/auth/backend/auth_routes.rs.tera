@@ -1,0 +1,17 @@
+use axum::{routing::{get, post, put}, Router};
+
+use crate::handlers::auth;
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/auth/register", post(auth::register))
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/me", get(auth::me))
+        // Admin-only user management routes
+        .route("/api/auth/users", get(auth::list_users))
+        .route("/api/auth/users/{user_id}/role", put(auth::update_role))
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

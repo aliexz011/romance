@@ -1,0 +1,26 @@
+import { lazy } from 'react';
+import { Route } from 'react-router-dom';
+import AdminLayout from './AdminLayout';
+import Dashboard from './Dashboard';
+
+{% for entity in entities %}
+const {{ entity.name }}List = lazy(() => import('@/features/{{ entity.name_camel }}/{{ entity.name }}List'));
+const {{ entity.name }}Form = lazy(() => import('@/features/{{ entity.name_camel }}/{{ entity.name }}Form'));
+const {{ entity.name }}Detail = lazy(() => import('@/features/{{ entity.name_camel }}/{{ entity.name }}Detail'));
+{% endfor %}
+
+export const adminRoutes = (
+  <Route path="/admin" element={<AdminLayout />}>
+    <Route index element={<Dashboard />} />
+{% for entity in entities %}
+    <Route path="{{ entity.name_snake | plural }}" element={<{{ entity.name }}List />} />
+    <Route path="{{ entity.name_snake | plural }}/new" element={<{{ entity.name }}Form />} />
+    <Route path="{{ entity.name_snake | plural }}/:id" element={<{{ entity.name }}Detail />} />
+    <Route path="{{ entity.name_snake | plural }}/:id/edit" element={<{{ entity.name }}Form />} />
+{% endfor %}
+    {/* === ROMANCE:ADMIN_ROUTES === */}
+  </Route>
+);
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

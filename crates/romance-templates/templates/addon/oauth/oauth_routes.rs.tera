@@ -1,0 +1,9 @@
+use axum::{routing::get, Router};
+use crate::handlers::oauth;
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/auth/oauth/{{ provider }}", get(oauth::oauth_redirect))
+        .route("/api/auth/oauth/{{ provider }}/callback", get(oauth::oauth_callback))
+}

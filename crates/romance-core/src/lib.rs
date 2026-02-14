@@ -1,0 +1,14 @@
+pub mod addon;
+pub mod ai_context;
+pub mod config;
+pub mod entity;
+pub mod generator;
+pub mod license;
+pub mod manifest;
+pub mod relation;
+pub mod scaffold;
+pub mod seed;
+pub mod template;
+pub mod test_runner;
+pub mod updater;
+pub mod utils;

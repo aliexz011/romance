@@ -1,0 +1,14 @@
+use sea_orm::DatabaseConnection;
+use anyhow::Result;
+
+/// Run all seed functions to populate the database with test data.
+///
+/// Called by `romance db seed`.
+pub async fn run(db: &DatabaseConnection) -> Result<()> {
+    tracing::info!("Running seed data...");
+
+    // === ROMANCE:SEEDS ===
+
+    tracing::info!("Seed data complete!");
+    Ok(())
+}

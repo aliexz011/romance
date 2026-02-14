@@ -1,0 +1,32 @@
+[package]
+name = "romance-core"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Core library for Romance CLI code generation"
+keywords = ["code-generator", "template-engine", "axum", "seaorm"]
+categories = ["development-tools"]
+readme = "../../README.md"
+
+[dependencies]
+romance-templates = { path = "../romance-templates" }
+tera = "1"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+heck = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+colored = "2"
+dialoguer = "0.11"
+sha2 = "0.10"
+similar = "2"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

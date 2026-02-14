@@ -1,0 +1,25 @@
+{
+  "common": {
+    "success": "Success",
+    "error": "Error",
+    "not_found": "Resource not found",
+    "unauthorized": "Unauthorized",
+    "forbidden": "Forbidden",
+    "validation_error": "Validation error",
+    "internal_error": "Internal server error",
+    "created": "Created successfully",
+    "updated": "Updated successfully",
+    "deleted": "Deleted successfully"
+  },
+  "auth": {
+    "login_success": "Login successful",
+    "login_failed": "Invalid email or password",
+    "register_success": "Registration successful",
+    "token_expired": "Token expired",
+    "token_invalid": "Invalid token"
+  },
+  "pagination": {
+    "invalid_page": "Invalid page number",
+    "invalid_per_page": "Invalid per_page value"
+  }
+}

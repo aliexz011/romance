@@ -1,0 +1,40 @@
+use axum::extract::State;
+use sea_orm::*;
+use serde::Serialize;
+
+use crate::api::{ok, ApiResponse};
+use crate::auth::AdminUser;
+use crate::errors::AppResult;
+use crate::routes::AppState;
+{% for entity in entities %}
+use crate::entities::{{ entity.name_snake }};
+{% endfor %}
+
+#[derive(Debug, Serialize)]
+pub struct DashboardStats {
+{% for entity in entities %}
+    pub {{ entity.name_snake }}_count: u64,
+{% endfor %}
+}
+
+pub async fn dashboard(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+) -> AppResult<ApiResponse<DashboardStats>> {
+{% for entity in entities %}
+    let {{ entity.name_snake }}_count = {{ entity.name_snake }}::Entity::find()
+        .count(&state.db)
+        .await?;
+{% endfor %}
+
+    let stats = DashboardStats {
+{% for entity in entities %}
+        {{ entity.name_snake }}_count,
+{% endfor %}
+    };
+
+    Ok(ok(stats))
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

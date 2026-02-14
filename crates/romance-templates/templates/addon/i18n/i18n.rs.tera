@@ -1,0 +1,92 @@
+use once_cell::sync::Lazy;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+static TRANSLATIONS: Lazy<RwLock<HashMap<String, Value>>> = Lazy::new(|| {
+    let mut map = HashMap::new();
+    // Load locale files from the locales/ directory
+    let locales_dir = std::path::Path::new("locales");
+    if locales_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(locales_dir) {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension() {
+                    if ext == "json" {
+                        if let Some(locale) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                                if let Ok(value) = serde_json::from_str(&content) {
+                                    map.insert(locale.to_string(), value);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    RwLock::new(map)
+});
+
+/// Get a translated string by key for the given locale.
+/// Keys use dot notation: "errors.not_found", "entities.post.created"
+/// Falls back to English ("en") if the locale is not found.
+pub fn t(locale: &str, key: &str) -> String {
+    let translations = TRANSLATIONS.read().unwrap();
+
+    // Try requested locale, fall back to "en"
+    for lang in &[locale, "en"] {
+        if let Some(root) = translations.get(*lang) {
+            let mut current = root;
+            for part in key.split('.') {
+                match current.get(part) {
+                    Some(next) => current = next,
+                    None => break,
+                }
+            }
+            if let Some(s) = current.as_str() {
+                return s.to_string();
+            }
+        }
+    }
+
+    // Return key as fallback
+    key.to_string()
+}
+
+/// Extract preferred locale from Accept-Language header.
+pub fn extract_locale(accept_language: Option<&str>) -> String {
+    accept_language
+        .and_then(|header| {
+            header
+                .split(',')
+                .next()
+                .map(|lang| lang.split(';').next().unwrap_or("en").trim().to_string())
+        })
+        .map(|lang| {
+            // Normalize: "en-US" -> "en"
+            lang.split('-').next().unwrap_or("en").to_lowercase()
+        })
+        .unwrap_or_else(|| "en".to_string())
+}
+
+/// Axum middleware that extracts locale from Accept-Language header
+/// and stores it in request extensions.
+pub async fn locale_middleware(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let locale = request
+        .headers()
+        .get(axum::http::header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| extract_locale(Some(s)))
+        .unwrap_or_else(|| "en".to_string());
+
+    let mut request = request;
+    request.extensions_mut().insert(Locale(locale));
+    next.run(request).await
+}
+
+/// Locale extension that can be extracted in handlers.
+#[derive(Clone, Debug)]
+pub struct Locale(pub String);

@@ -1,0 +1,53 @@
+use sea_orm_migration::{prelude::*, schema::*};
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table({{ entity_name }}::Table)
+                    .if_not_exists()
+                    .col(pk_uuid({{ entity_name }}::Id))
+{% for field in fields -%}
+{% if field.optional %}                    .col(ColumnDef::new({{ entity_name }}::{{ field.name | pascal_case }}).{{ field.migration_method }}.null())
+{% else %}                    .col(ColumnDef::new({{ entity_name }}::{{ field.name | pascal_case }}).{{ field.migration_method }}.not_null())
+{% endif -%}
+{% endfor %}                    .col(ColumnDef::new({{ entity_name }}::CreatedAt).timestamp_with_time_zone().not_null())
+                    .col(ColumnDef::new({{ entity_name }}::UpdatedAt).timestamp_with_time_zone().not_null())
+{% if soft_delete %}                    .col(ColumnDef::new({{ entity_name }}::DeletedAt).timestamp_with_time_zone().null())
+{% endif %}
+{% for field in fields -%}
+{% if field.relation %}                    .foreign_key(
+                        ForeignKey::create()
+                            .from({{ entity_name }}::Table, {{ entity_name }}::{{ field.name | pascal_case }})
+                            .to(Alias::new("{{ field.relation | snake_case | plural }}"), Alias::new("id"))
+                            .on_delete(ForeignKeyAction::Cascade)
+                    )
+{% endif -%}
+{% endfor %}                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table({{ entity_name }}::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum {{ entity_name }} {
+    #[sea_orm(iden = "{{ entity_name_snake | plural }}")]
+    Table,
+    Id,
+{% for field in fields %}    {{ field.name | pascal_case }},
+{% endfor %}    CreatedAt,
+    UpdatedAt,
+{% if soft_delete %}    DeletedAt,
+{% endif %}
+}

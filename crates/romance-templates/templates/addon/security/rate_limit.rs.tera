@@ -1,0 +1,137 @@
+use governor::clock::DefaultClock;
+use governor::state::keyed::DefaultKeyedStateStore;
+use governor::{Quota, RateLimiter};
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use once_cell::sync::Lazy;
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use axum::http::header;
+
+/// Per-key rate limiter for anonymous (IP-based) requests.
+/// Configure via RATE_LIMIT_ANON_RPM environment variable (default: 30).
+static ANON_LIMITER: Lazy<Arc<RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>> =
+    Lazy::new(|| {
+        let rpm = std::env::var("RATE_LIMIT_ANON_RPM")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(30);
+        let quota =
+            Quota::per_minute(NonZeroU32::new(rpm).unwrap_or(NonZeroU32::new(30).unwrap()));
+        Arc::new(RateLimiter::keyed(quota))
+    });
+
+/// Per-key rate limiter for authenticated (user-based) requests.
+/// Configure via RATE_LIMIT_AUTH_RPM environment variable (default: 120).
+static AUTH_LIMITER: Lazy<Arc<RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>> =
+    Lazy::new(|| {
+        let rpm = std::env::var("RATE_LIMIT_AUTH_RPM")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(120);
+        let quota =
+            Quota::per_minute(NonZeroU32::new(rpm).unwrap_or(NonZeroU32::new(120).unwrap()));
+        Arc::new(RateLimiter::keyed(quota))
+    });
+
+/// Try to extract user_id from a JWT Bearer token without full validation.
+/// Decodes the payload (second segment) and reads the `sub` claim.
+/// Returns None if no valid token is present or parsing fails.
+fn extract_user_id_from_jwt(request: &Request) -> Option<String> {
+    let auth_header = request.headers().get(header::AUTHORIZATION)?;
+    let auth_str = auth_header.to_str().ok()?;
+    let token = auth_str.strip_prefix("Bearer ")?;
+
+    // JWT structure: header.payload.signature — we only need the payload
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    // Decode the payload (base64url-encoded)
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
+    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).ok()?;
+    payload.get("sub").and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Extract client IP address from request.
+/// Checks X-Forwarded-For, X-Real-IP headers first, then falls back to
+/// the peer address from the connection info.
+fn extract_client_ip(request: &Request) -> String {
+    // Try X-Forwarded-For (first IP in the chain)
+    if let Some(forwarded) = request.headers().get("x-forwarded-for") {
+        if let Ok(val) = forwarded.to_str() {
+            if let Some(ip) = val.split(',').next() {
+                let ip = ip.trim();
+                if !ip.is_empty() {
+                    return ip.to_string();
+                }
+            }
+        }
+    }
+
+    // Try X-Real-IP
+    if let Some(real_ip) = request.headers().get("x-real-ip") {
+        if let Ok(val) = real_ip.to_str() {
+            let val = val.trim();
+            if !val.is_empty() {
+                return val.to_string();
+            }
+        }
+    }
+
+    // Fallback: use the connect info if available, otherwise "unknown"
+    if let Some(connect_info) = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+    {
+        return connect_info.0.ip().to_string();
+    }
+
+    "unknown".to_string()
+}
+
+/// Rate limiting middleware with per-user throttling.
+///
+/// - Authenticated users (valid JWT with `sub` claim): rate-limited by user ID
+///   with a higher limit (RATE_LIMIT_AUTH_RPM, default 120 RPM).
+/// - Anonymous users: rate-limited by client IP address with a lower limit
+///   (RATE_LIMIT_ANON_RPM, default 30 RPM).
+///
+/// Works gracefully when the auth addon is not installed — falls back to
+/// IP-based limiting if no Authorization header is present.
+pub async fn rate_limit_middleware(
+    request: Request,
+    next: Next,
+) -> Response {
+    // Determine the rate limit key and which limiter to use
+    let check_result = if let Some(user_id) = extract_user_id_from_jwt(&request) {
+        // Authenticated user: higher limit, keyed by user ID
+        AUTH_LIMITER.check_key(&user_id)
+    } else {
+        // Anonymous: lower limit, keyed by IP
+        let ip = extract_client_ip(&request);
+        ANON_LIMITER.check_key(&ip)
+    };
+
+    match check_result {
+        Ok(_) => next.run(request).await,
+        Err(_) => {
+            let body = serde_json::json!({
+                "success": false,
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "Too many requests. Please try again later.",
+                }
+            });
+            (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                axum::Json(body),
+            )
+                .into_response()
+        }
+    }
+}

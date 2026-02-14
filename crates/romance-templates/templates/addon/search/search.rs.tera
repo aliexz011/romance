@@ -1,0 +1,85 @@
+use sea_orm::*;
+
+/// Helper for PostgreSQL full-text search using tsvector.
+///
+/// When an entity has [searchable] fields, the generator creates:
+/// 1. A `search_vector` tsvector column in the migration
+/// 2. A GIN index on the search_vector column
+/// 3. A trigger to auto-update the search_vector on insert/update
+/// 4. A search endpoint that uses ts_rank for relevance ordering
+///
+/// Usage in handlers:
+/// ```rust
+/// use crate::search::build_search_query;
+///
+/// let results = build_search_query::<Entity>(query_string, &["title", "description"])
+///     .all(&state.db)
+///     .await?;
+/// ```
+
+/// Sanitize user input for use as a tsquery string.
+/// Strips dangerous characters and formats as prefix-match AND query.
+pub fn build_tsquery(search_term: &str) -> String {
+    // Strip any characters that could break tsquery syntax
+    let sanitized: String = search_term
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect();
+
+    let terms: Vec<String> = sanitized
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{}:*", t))
+        .collect();
+
+    if terms.is_empty() {
+        String::new()
+    } else {
+        terms.join(" & ")
+    }
+}
+
+/// Build a WHERE clause condition for full-text search.
+/// Returns a `SimpleExpr` that can be used with SeaORM's `.filter()`.
+///
+/// Uses parameterized query to prevent SQL injection.
+pub fn search_condition(search_columns: &[&str], search_term: &str) -> SimpleExpr {
+    let tsquery = build_tsquery(search_term);
+    if tsquery.is_empty() {
+        return Expr::cust("1=1");
+    }
+
+    // Build tsvector expression from columns
+    let tsvector_parts: Vec<String> = search_columns
+        .iter()
+        .map(|col| format!("coalesce(\"{}\", '')", col))
+        .collect();
+
+    let tsvector_expr = tsvector_parts.join(" || ' ' || ");
+
+    Expr::cust_with_values(
+        &format!("to_tsvector('english', {}) @@ to_tsquery('english', $1)", tsvector_expr),
+        [tsquery.into()],
+    )
+}
+
+/// Build a rank expression for ordering results by relevance.
+/// Returns a `SimpleExpr` for use with `.order_by_expr()`.
+pub fn search_rank_expr(search_columns: &[&str], search_term: &str) -> SimpleExpr {
+    let tsquery = build_tsquery(search_term);
+    if tsquery.is_empty() {
+        return Expr::cust("0");
+    }
+
+    let tsvector_parts: Vec<String> = search_columns
+        .iter()
+        .map(|col| format!("coalesce(\"{}\", '')", col))
+        .collect();
+
+    let tsvector_expr = tsvector_parts.join(" || ' ' || ");
+
+    Expr::cust_with_values(
+        &format!("ts_rank(to_tsvector('english', {}), to_tsquery('english', $1))", tsvector_expr),
+        [tsquery.into()],
+    )
+}

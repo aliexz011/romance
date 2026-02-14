@@ -1,0 +1,181 @@
+use axum::extract::{Path, State};
+use sea_orm::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::api::{ok, ApiResponse};
+use crate::auth::{self, AdminUser, AuthUser};
+use crate::entities::user::{self, CreateUser, UpdateUserRole, UserPublic};
+use crate::errors::{AppError, AppResult};
+use crate::routes::AppState;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthResponse {
+    pub token: String,
+    pub user: UserPublic,
+}
+
+pub async fn register(
+    State(state): State<AppState>,
+    axum::Json(input): axum::Json<CreateUser>,
+) -> AppResult<ApiResponse<AuthResponse>> {
+    // Check if email is already taken
+    let existing = user::Entity::find()
+        .filter(user::Column::Email.eq(&input.email))
+        .one(&state.db)
+        .await?;
+
+    if existing.is_some() {
+        return Err(AppError::Conflict("Email already registered".into()));
+    }
+
+    let password_hash = auth::hash_password(&input.password)
+        .map_err(|e| AppError::Internal(e))?;
+
+    let now = chrono::Utc::now().fixed_offset();
+    let user_id = Uuid::new_v4();
+
+    let model = user::ActiveModel {
+        id: Set(user_id),
+        email: Set(input.email.clone()),
+        password_hash: Set(password_hash),
+        role: Set("user".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    let created = model.insert(&state.db).await?;
+
+    let token = auth::create_token(created.id, &created.email, &created.role)
+        .map_err(|e| AppError::Internal(e))?;
+
+    let user_public = UserPublic {
+        id: created.id,
+        email: created.email,
+        role: created.role,
+        created_at: created.created_at,
+    };
+
+    Ok(ok(AuthResponse {
+        token,
+        user: user_public,
+    }))
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    axum::Json(input): axum::Json<LoginRequest>,
+) -> AppResult<ApiResponse<AuthResponse>> {
+    let user = user::Entity::find()
+        .filter(user::Column::Email.eq(&input.email))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::Unauthorized("Invalid email or password".into()))?;
+
+    let valid = auth::verify_password(&input.password, &user.password_hash)
+        .map_err(|e| AppError::Internal(e))?;
+
+    if !valid {
+        return Err(AppError::Unauthorized("Invalid email or password".into()));
+    }
+
+    let token = auth::create_token(user.id, &user.email, &user.role)
+        .map_err(|e| AppError::Internal(e))?;
+
+    let user_public = UserPublic {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at,
+    };
+
+    Ok(ok(AuthResponse {
+        token,
+        user: user_public,
+    }))
+}
+
+pub async fn me(
+    auth: AuthUser,
+    State(state): State<AppState>,
+) -> AppResult<ApiResponse<UserPublic>> {
+    let user_id = auth.0.sub.parse::<Uuid>()
+        .map_err(|_| AppError::Unauthorized("Invalid user ID in token".into()))?;
+
+    let user = user::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+
+    let user_public = UserPublic {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at,
+    };
+
+    Ok(ok(user_public))
+}
+
+/// Update a user's role. Requires admin access.
+pub async fn update_role(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+    axum::Json(input): axum::Json<UpdateUserRole>,
+) -> AppResult<ApiResponse<UserPublic>> {
+    if !user::is_valid_role(&input.role) {
+        return Err(AppError::Validation(format!("Invalid role: '{}'. Allowed roles: admin, user", input.role)));
+    }
+
+    let target = user::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".into()))?;
+
+    let now = chrono::Utc::now().fixed_offset();
+    let mut model: user::ActiveModel = target.into();
+    model.role = Set(input.role);
+    model.updated_at = Set(now);
+
+    let updated = model.update(&state.db).await?;
+
+    Ok(ok(UserPublic {
+        id: updated.id,
+        email: updated.email,
+        role: updated.role,
+        created_at: updated.created_at,
+    }))
+}
+
+/// List all users. Requires admin access.
+pub async fn list_users(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+) -> AppResult<ApiResponse<Vec<UserPublic>>> {
+    let users = user::Entity::find()
+        .order_by_desc(user::Column::CreatedAt)
+        .all(&state.db)
+        .await?;
+
+    let users_public: Vec<UserPublic> = users
+        .into_iter()
+        .map(|u| UserPublic {
+            id: u.id,
+            email: u.email,
+            role: u.role,
+            created_at: u.created_at,
+        })
+        .collect();
+
+    Ok(ok(users_public))
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

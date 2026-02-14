@@ -1,0 +1,19 @@
+import { apiFetch } from '@/lib/utils';
+import type { AuthResponse, LoginRequest, RegisterRequest, User } from './types';
+
+export const authApi = {
+  login: (data: LoginRequest) =>
+    apiFetch<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  register: (data: RegisterRequest) =>
+    apiFetch<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  me: () =>
+    apiFetch<User>('/auth/me'),
+};

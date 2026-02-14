@@ -1,0 +1,126 @@
+use axum::extract::{Query, State};
+use axum::response::Redirect;
+use oauth2::{AuthorizationCode, CsrfToken, Scope, TokenResponse};
+use sea_orm::*;
+
+use crate::auth;
+use crate::errors::{AppError, AppResult};
+use crate::api::{ok, ApiResponse};
+use crate::routes::AppState;
+
+#[derive(serde::Deserialize)]
+pub struct OAuthCallback {
+    pub code: String,
+    pub state: String,
+}
+
+/// Redirect to OAuth provider for authentication.
+/// GET /api/auth/oauth/{{ provider }}
+pub async fn oauth_redirect(
+    State(state): State<AppState>,
+) -> Result<Redirect, AppError> {
+    let client_id = std::env::var("{{ provider | upper }}_CLIENT_ID")
+        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_ID not set".into()))?;
+    let client_secret = std::env::var("{{ provider | upper }}_CLIENT_SECRET")
+        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_SECRET not set".into()))?;
+
+    let redirect_url = format!(
+        "{}/api/auth/oauth/{{ provider }}/callback",
+        std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3001".to_string())
+    );
+
+    let client = crate::oauth::create_oauth_client(&client_id, &client_secret, &redirect_url);
+
+    let (auth_url, _csrf_token) = client
+        .authorize_url(CsrfToken::new_random)
+{% if provider == "google" %}
+        .add_scope(Scope::new("email".to_string()))
+        .add_scope(Scope::new("profile".to_string()))
+{% elif provider == "github" %}
+        .add_scope(Scope::new("user:email".to_string()))
+{% elif provider == "discord" %}
+        .add_scope(Scope::new("identify".to_string()))
+        .add_scope(Scope::new("email".to_string()))
+{% endif %}
+        .url();
+
+    Ok(Redirect::to(auth_url.as_str()))
+}
+
+/// Handle OAuth callback, create/link user, return JWT.
+/// GET /api/auth/oauth/{{ provider }}/callback
+pub async fn oauth_callback(
+    State(state): State<AppState>,
+    Query(params): Query<OAuthCallback>,
+) -> AppResult<ApiResponse<serde_json::Value>> {
+    let client_id = std::env::var("{{ provider | upper }}_CLIENT_ID")
+        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_ID not set".into()))?;
+    let client_secret = std::env::var("{{ provider | upper }}_CLIENT_SECRET")
+        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_SECRET not set".into()))?;
+
+    let redirect_url = format!(
+        "{}/api/auth/oauth/{{ provider }}/callback",
+        std::env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3001".to_string())
+    );
+
+    let client = crate::oauth::create_oauth_client(&client_id, &client_secret, &redirect_url);
+
+    // Exchange code for token
+    let http_client = reqwest::Client::new();
+    let token = client
+        .exchange_code(AuthorizationCode::new(params.code))
+        .request_async(&http_client)
+        .await
+        .map_err(|e| AppError::Internal(format!("OAuth token exchange failed: {}", e)))?;
+
+    let access_token = token.access_token().secret();
+
+    // Fetch user info from provider
+    let user_info = crate::oauth::fetch_user_info(access_token)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to fetch user info: {}", e)))?;
+
+    // Find or create user
+    let email = user_info
+        .email
+        .ok_or_else(|| AppError::BadRequest("Email not available from OAuth provider".into()))?;
+
+    let existing_user = crate::entities::user::Entity::find()
+        .filter(crate::entities::user::Column::Email.eq(&email))
+        .one(&state.db)
+        .await?;
+
+    let user = if let Some(user) = existing_user {
+        // Update OAuth info
+        let mut active: crate::entities::user::ActiveModel = user.into();
+        active.oauth_provider = Set(Some("{{ provider }}".to_string()));
+        active.oauth_id = Set(Some(user_info.id));
+        active.update(&state.db).await?
+    } else {
+        // Create new user
+        let now = chrono::Utc::now().fixed_offset();
+        let new_user = crate::entities::user::ActiveModel {
+            id: Set(uuid::Uuid::new_v4()),
+            email: Set(email),
+            password_hash: Set("oauth-user".to_string()), // OAuth users don't have passwords
+            role: Set("user".to_string()),
+            oauth_provider: Set(Some("{{ provider }}".to_string())),
+            oauth_id: Set(Some(user_info.id)),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        new_user.insert(&state.db).await?
+    };
+
+    // Generate JWT
+    let token = auth::create_token(user.id, &user.email, &user.role)?;
+
+    Ok(ok(serde_json::json!({
+        "token": token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "role": user.role,
+        }
+    })))
+}

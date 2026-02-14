@@ -1,0 +1,55 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { {{ entity_name_camel }}Api } from './api';
+import type { {{ entity_name }}ListParams } from './api';
+import type { Create{{ entity_name }}, Update{{ entity_name }} } from './types';
+
+const QUERY_KEY = '{{ entity_name_snake | plural }}';
+
+export function use{{ entity_name | plural }}(params: {{ entity_name }}ListParams = {}) {
+  return useQuery({
+    queryKey: [QUERY_KEY, params],
+    queryFn: () => {{ entity_name_camel }}Api.list(params),
+  });
+}
+
+export function use{{ entity_name }}(id: string) {
+  return useQuery({
+    queryKey: [QUERY_KEY, id],
+    queryFn: () => {{ entity_name_camel }}Api.get(id),
+    enabled: !!id,
+  });
+}
+
+export function useCreate{{ entity_name }}() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Create{{ entity_name }}) => {{ entity_name_camel }}Api.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    },
+  });
+}
+
+export function useUpdate{{ entity_name }}() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Update{{ entity_name }} }) =>
+      {{ entity_name_camel }}Api.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    },
+  });
+}
+
+export function useDelete{{ entity_name }}() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => {{ entity_name_camel }}Api.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [QUERY_KEY] });
+    },
+  });
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

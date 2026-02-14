@@ -1,0 +1,29 @@
+[package]
+name = "romance-cli"
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Full-stack code generator CLI: Axum + SeaORM + React + TypeScript + shadcn/ui"
+keywords = ["code-generator", "full-stack", "axum", "react", "crud"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../../README.md"
+default-run = "romance"
+
+[[bin]]
+name = "romance"
+path = "src/main.rs"
+
+[dependencies]
+romance-core = { path = "../romance-core" }
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+colored = "2"
+anyhow = "1"
+dialoguer = "0.11"
+heck = "0.5"
+chrono = "0.4"
+toml = "0.8"
+serde_json = "1"

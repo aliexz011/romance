@@ -1,0 +1,53 @@
+use anyhow::Result;
+use lettre::message::header::ContentType;
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{Message, SmtpTransport, Transport};
+
+pub struct EmailService {
+    transport: SmtpTransport,
+    from: String,
+}
+
+impl EmailService {
+    pub fn new() -> Self {
+        let smtp_host = std::env::var("SMTP_HOST").expect("SMTP_HOST must be set");
+        let smtp_user = std::env::var("SMTP_USER").expect("SMTP_USER must be set");
+        let smtp_pass = std::env::var("SMTP_PASS").expect("SMTP_PASS must be set");
+        let from = std::env::var("FROM_EMAIL").expect("FROM_EMAIL must be set");
+
+        let creds = Credentials::new(smtp_user, smtp_pass);
+
+        let transport = SmtpTransport::relay(&smtp_host)
+            .expect("Failed to create SMTP transport")
+            .credentials(creds)
+            .build();
+
+        Self { transport, from }
+    }
+
+    /// Send a plain-text email.
+    pub async fn send(&self, to: &str, subject: &str, body: &str) -> Result<()> {
+        let email = Message::builder()
+            .from(self.from.parse()?)
+            .to(to.parse()?)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body.to_string())?;
+
+        self.transport.send(&email)?;
+        Ok(())
+    }
+
+    /// Send an HTML email.
+    pub async fn send_html(&self, to: &str, subject: &str, html: &str) -> Result<()> {
+        let email = Message::builder()
+            .from(self.from.parse()?)
+            .to(to.parse()?)
+            .subject(subject)
+            .header(ContentType::TEXT_HTML)
+            .body(html.to_string())?;
+
+        self.transport.send(&email)?;
+        Ok(())
+    }
+}

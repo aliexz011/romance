@@ -1,0 +1,79 @@
+/// Test helpers for Romance-generated projects.
+///
+/// Provides:
+/// - `TestApp` struct for spinning up the server on a random port
+/// - Database helpers for isolated test databases
+/// - Authenticated HTTP client helper
+
+#[cfg(test)]
+pub mod test_helpers {
+    use axum::Router;
+    use sea_orm::DatabaseConnection;
+    use std::net::SocketAddr;
+
+    /// A test app instance with its own server and database connection.
+    pub struct TestApp {
+        pub address: String,
+        pub db: DatabaseConnection,
+        pub client: reqwest::Client,
+    }
+
+    impl TestApp {
+        /// Spawn the app on a random port for testing.
+        pub async fn spawn(db: DatabaseConnection) -> Self {
+            let app = crate::routes::create_router(db.clone());
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("Failed to bind random port");
+
+            let addr = listener.local_addr().unwrap();
+            let address = format!("http://{}", addr);
+
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+
+            let client = reqwest::Client::new();
+
+            TestApp {
+                address,
+                db,
+                client,
+            }
+        }
+
+        /// Make a GET request to the test server.
+        pub async fn get(&self, path: &str) -> reqwest::Response {
+            self.client
+                .get(format!("{}{}", self.address, path))
+                .send()
+                .await
+                .expect("Failed to send request")
+        }
+
+        /// Make a POST request with JSON body to the test server.
+        pub async fn post_json(
+            &self,
+            path: &str,
+            body: &serde_json::Value,
+        ) -> reqwest::Response {
+            self.client
+                .post(format!("{}{}", self.address, path))
+                .json(body)
+                .send()
+                .await
+                .expect("Failed to send request")
+        }
+
+        /// Make an authenticated GET request.
+        pub async fn get_auth(&self, path: &str, token: &str) -> reqwest::Response {
+            self.client
+                .get(format!("{}{}", self.address, path))
+                .bearer_auth(token)
+                .send()
+                .await
+                .expect("Failed to send request")
+        }
+    }
+}

@@ -1,0 +1,68 @@
+use axum::extract::Request;
+use axum::http::{HeaderName, HeaderValue};
+use axum::middleware::Next;
+use axum::response::Response;
+use uuid::Uuid;
+
+static X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+
+/// Middleware that generates a unique request ID for each request.
+/// The ID is added to the response headers and to the tracing span.
+pub async fn request_id_middleware(
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let request_id = request
+        .headers()
+        .get(&X_REQUEST_ID)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    // Insert request ID into headers so downstream can use it
+    request.headers_mut().insert(
+        X_REQUEST_ID.clone(),
+        HeaderValue::from_str(&request_id).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+    );
+
+    let span = tracing::info_span!(
+        "request",
+        request_id = %request_id,
+        method = %request.method(),
+        uri = %request.uri(),
+    );
+
+    let _enter = span.enter();
+
+    let mut response = next.run(request).await;
+
+    response.headers_mut().insert(
+        X_REQUEST_ID,
+        HeaderValue::from_str(&request_id).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+    );
+
+    response
+}
+
+/// Helper to create a tower layer for request ID propagation.
+pub fn request_id_layer() -> tower_http::request_id::SetRequestIdLayer<MakeRequestUuid> {
+    tower_http::request_id::SetRequestIdLayer::new(
+        X_REQUEST_ID.clone(),
+        MakeRequestUuid,
+    )
+}
+
+#[derive(Clone)]
+pub struct MakeRequestUuid;
+
+impl tower_http::request_id::MakeRequestId for MakeRequestUuid {
+    fn make_request_id<B>(
+        &mut self,
+        _request: &axum::http::Request<B>,
+    ) -> Option<tower_http::request_id::RequestId> {
+        let id = Uuid::new_v4().to_string();
+        Some(tower_http::request_id::RequestId::new(
+            HeaderValue::from_str(&id).unwrap(),
+        ))
+    }
+}

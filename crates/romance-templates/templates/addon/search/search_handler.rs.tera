@@ -1,0 +1,41 @@
+use axum::extract::{Query, State};
+use serde::Deserialize;
+
+use crate::errors::AppResult;
+use crate::api::{ok, ApiResponse};
+use crate::routes::AppState;
+
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    pub q: String,
+    pub entity: Option<String>,
+    pub limit: Option<u64>,
+}
+
+/// Generic search endpoint.
+/// GET /api/search?q=term&entity=product&limit=20
+///
+/// Note: Entity-specific search endpoints are generated per entity
+/// when the entity has [searchable] fields. This handler provides
+/// a unified search across all searchable entities.
+pub async fn search(
+    State(state): State<AppState>,
+    Query(params): Query<SearchQuery>,
+) -> AppResult<ApiResponse<serde_json::Value>> {
+    let query = params.q.trim();
+    if query.is_empty() {
+        return Ok(ok(serde_json::json!({ "results": [] })));
+    }
+
+    let limit = params.limit.unwrap_or(20).min(100);
+
+    // This is a placeholder. Each entity with [searchable] fields
+    // gets its own /api/{entities}/search endpoint generated.
+    // This unified endpoint can be extended to search across all entities.
+    Ok(ok(serde_json::json!({
+        "query": query,
+        "limit": limit,
+        "results": [],
+        "message": "Use entity-specific search endpoints: GET /api/{entities}/search?q=term"
+    })))
+}
