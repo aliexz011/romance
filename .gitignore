@@ -21,6 +21,9 @@ Thumbs.db
 # Romance license
 # (users' license files should not be committed)
 
+# AI assistant
+CLAUDE.md
+
 # Temporary
 *.tmp
 *.bak
