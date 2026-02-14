@@ -55,7 +55,7 @@ export default function {{ entity_name }}Form() {
 {% for field in fields %}{% if field.relation %}
   const { data: {{ field.relation_camel }}Options } = useQuery({
     queryKey: ['{{ field.relation_plural }}'],
-    queryFn: () => {{ field.relation_camel }}Api.list(1, 100),
+    queryFn: () => {{ field.relation_camel }}Api.list({ page: 1, perPage: 100 }),
   });
 {% endif %}{% endfor %}
   const {

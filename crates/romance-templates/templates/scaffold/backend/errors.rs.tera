@@ -96,4 +96,10 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Internal(err.into())
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;

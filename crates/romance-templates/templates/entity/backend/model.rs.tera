@@ -19,12 +19,26 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
 {% for field in fields -%}
-{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% if field.rust_type == "DateTimeWithTimeZone" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    #[schema(value_type = String)]
+    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
+{% elif field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    #[schema(value_type = String)]
+    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
+{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    pub {{ field.name }}: {{ field.rust_type }},
 {% endif -%}
-{% endfor %}    pub created_at: DateTimeWithTimeZone,
+{% endif -%}
+{% endfor %}    #[schema(value_type = String)]
+    pub created_at: DateTimeWithTimeZone,
+    #[schema(value_type = String)]
     pub updated_at: DateTimeWithTimeZone,
-{% if soft_delete %}    pub deleted_at: Option<DateTimeWithTimeZone>,
+{% if soft_delete %}    #[schema(value_type = Option<String>)]
+    pub deleted_at: Option<DateTimeWithTimeZone>,
 {% endif %}
 }
 
@@ -78,14 +92,21 @@ pub struct Create{{ entity_name }} {
 {% endif %}{% endif -%}
 {% endfor -%}
 {% endif -%}
-{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    #[schema(value_type = String)]
+    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
+{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
 {% endif -%}
 {% endfor %}}
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Update{{ entity_name }} {
-{% for field in fields %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% for field in fields %}{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}    #[schema(value_type = Option<String>)]
+{% endif %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% endfor %}}
 
 /// API response DTO — controls which fields are exposed.
@@ -94,11 +115,19 @@ pub struct Update{{ entity_name }} {
 pub struct {{ entity_name }}Response {
     pub id: Uuid,
 {% for field in fields %}
-{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    #[schema(value_type = String)]
+    pub {{ field.name }}: {{ field.rust_type }},
+{% endif %}
+{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    pub {{ field.name }}: {{ field.rust_type }},
 {% endif %}
+{% endif %}
 {% endfor %}
+    #[schema(value_type = String)]
     pub created_at: DateTimeWithTimeZone,
+    #[schema(value_type = String)]
     pub updated_at: DateTimeWithTimeZone,
 }
 
@@ -183,12 +212,12 @@ impl From<Model> for {{ entity_name }}DetailResponse {
 }
 {% endif %}
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct BulkCreate{{ entity_name }} {
     pub items: Vec<Create{{ entity_name }}>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct BulkDelete {
     pub ids: Vec<Uuid>,
 }

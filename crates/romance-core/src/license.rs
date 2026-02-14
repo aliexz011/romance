@@ -124,6 +124,17 @@ pub fn validate_online(key: &str) -> Result<LicenseValidationResponse> {
 /// 6. If grace period exceeded -> return error
 /// 7. Return LicenseStatus
 pub fn check_license() -> Result<LicenseStatus> {
+    // Dev mode bypass — for local development and testing
+    if std::env::var("ROMANCE_DEV").is_ok() {
+        return Ok(LicenseStatus {
+            valid: true,
+            expired: false,
+            days_remaining: 999,
+            plan: "dev".to_string(),
+            needs_revalidation: false,
+        });
+    }
+
     let info = load_license()?;
 
     let info = match info {

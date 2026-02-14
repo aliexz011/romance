@@ -3,8 +3,8 @@ use sea_orm::*;
 use uuid::Uuid;
 
 use crate::api::{ok, ok_page, ApiResponse};
-{% if has_belongs_to %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Model, Update{{ entity_name }}, {{ entity_name }}Response, {{ entity_name }}DetailResponse, BulkCreate{{ entity_name }}, BulkDelete};
-{% else %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Model, Update{{ entity_name }}, {{ entity_name }}Response, BulkCreate{{ entity_name }}, BulkDelete};
+{% if has_belongs_to %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Update{{ entity_name }}, {{ entity_name }}Response, {{ entity_name }}DetailResponse, BulkCreate{{ entity_name }}, BulkDelete};
+{% else %}use crate::entities::{{ entity_name_snake }}::{ActiveModel, Column, Create{{ entity_name }}, Entity, Update{{ entity_name }}, {{ entity_name }}Response, BulkCreate{{ entity_name }}, BulkDelete};
 {% endif %}
 use crate::errors::AppResult;
 use crate::pagination::{PageMeta, PageRequest};
@@ -217,6 +217,14 @@ pub async fn create(
 {% else %}    axum::Json(input): axum::Json<Create{{ entity_name }}>,
 {% endif %}
 ) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
+    // Emit pre-create hook (serialize before consuming input)
+    if let Ok(data) = serde_json::to_value(&input) {
+        state.event_bus.emit(crate::events::EntityEvent::PreCreate {
+            entity_type: "{{ entity_name }}".to_string(),
+            data,
+        });
+    }
+
     let now = chrono::Utc::now().fixed_offset();
     let id = Uuid::new_v4();
     let model = ActiveModel {
@@ -228,14 +236,6 @@ pub async fn create(
 {% endif %}
         ..Default::default()
     };
-
-    // Emit pre-create hook
-    if let Ok(data) = serde_json::to_value(&input) {
-        state.event_bus.emit(crate::events::EntityEvent::PreCreate {
-            entity_type: "{{ entity_name }}".to_string(),
-            data,
-        });
-    }
 
     let result = model.insert(&state.db).await?;
 
@@ -283,6 +283,15 @@ pub async fn update(
     let now = chrono::Utc::now().fixed_offset();
     let mut model: ActiveModel = item.into();
 
+    // Emit pre-update hook (serialize before consuming input)
+    if let Ok(data) = serde_json::to_value(&input) {
+        state.event_bus.emit(crate::events::EntityEvent::PreUpdate {
+            entity_type: "{{ entity_name }}".to_string(),
+            entity_id: id.to_string(),
+            data,
+        });
+    }
+
 {% for field in fields -%}
 {% if field.optional %}    if let Some(val) = input.{{ field.name }} {
         model.{{ field.name }} = Set(Some(val));
@@ -292,15 +301,6 @@ pub async fn update(
     }
 {% endif -%}
 {% endfor %}    model.updated_at = Set(now);
-
-    // Emit pre-update hook
-    if let Ok(data) = serde_json::to_value(&input) {
-        state.event_bus.emit(crate::events::EntityEvent::PreUpdate {
-            entity_type: "{{ entity_name }}".to_string(),
-            entity_id: id.to_string(),
-            data,
-        });
-    }
 
     let result = model.update(&state.db).await?;
 
