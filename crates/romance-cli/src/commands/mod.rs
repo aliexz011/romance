@@ -7,6 +7,7 @@ pub mod dev;
 pub mod doctor;
 pub mod generate;
 pub mod new;
+pub mod remove;
 pub mod run;
 pub mod test;
 pub mod update;
@@ -37,6 +38,11 @@ pub enum Commands {
     Add {
         #[command(subcommand)]
         command: AddCommands,
+    },
+    /// Remove an installed addon
+    Remove {
+        #[command(subcommand)]
+        command: RemoveCommands,
     },
     /// Run development servers (backend + frontend)
     Dev,
@@ -140,6 +146,40 @@ pub enum AddCommands {
 }
 
 #[derive(Subcommand)]
+pub enum RemoveCommands {
+    /// Remove validation addon
+    Validation,
+    /// Remove soft-delete addon
+    SoftDelete,
+    /// Remove audit logging addon
+    AuditLog,
+    /// Remove file storage addon
+    Storage,
+    /// Remove full-text search addon
+    Search,
+    /// Remove OAuth addon
+    Oauth,
+    /// Remove security middleware addon
+    Security,
+    /// Remove observability addon
+    Observability,
+    /// Remove developer dashboard addon
+    Dashboard,
+    /// Remove email system addon
+    Email,
+    /// Remove i18n addon
+    I18n,
+    /// Remove caching layer addon
+    Cache,
+    /// Remove background tasks addon
+    Tasks,
+    /// Remove WebSocket addon
+    Websocket,
+    /// Remove API key authentication addon
+    ApiKeys,
+}
+
+#[derive(Subcommand)]
 pub enum DbCommands {
     /// Run pending migrations
     Migrate,
@@ -194,6 +234,23 @@ pub fn run(cli: Cli) -> Result<()> {
             AddCommands::Tasks => add::run_tasks(),
             AddCommands::Websocket => add::run_websocket(),
             AddCommands::ApiKeys => add::run_api_keys(),
+        },
+        Commands::Remove { command } => match command {
+            RemoveCommands::Validation => remove::run_validation(),
+            RemoveCommands::SoftDelete => remove::run_soft_delete(),
+            RemoveCommands::AuditLog => remove::run_audit_log(),
+            RemoveCommands::Storage => remove::run_storage(),
+            RemoveCommands::Search => remove::run_search(),
+            RemoveCommands::Oauth => remove::run_oauth(),
+            RemoveCommands::Security => remove::run_security(),
+            RemoveCommands::Observability => remove::run_observability(),
+            RemoveCommands::Dashboard => remove::run_dashboard(),
+            RemoveCommands::Email => remove::run_email(),
+            RemoveCommands::I18n => remove::run_i18n(),
+            RemoveCommands::Cache => remove::run_cache(),
+            RemoveCommands::Tasks => remove::run_tasks(),
+            RemoveCommands::Websocket => remove::run_websocket(),
+            RemoveCommands::ApiKeys => remove::run_api_keys(),
         },
         Commands::Dev => dev::run(),
         Commands::Check => check::run(),

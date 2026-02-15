@@ -36,6 +36,40 @@ pub trait Addon {
     }
 }
 
+/// Resolve an addon name to its concrete instance and run it.
+/// Used for auto-installing dependencies.
+fn resolve_and_install_dependency(name: &str, project_root: &Path) -> Result<()> {
+    use colored::Colorize;
+
+    match name {
+        "auth" => {
+            // Auth is not an addon, it's a generator. Just check it exists.
+            if !project_root.join("backend/src/auth.rs").exists() {
+                anyhow::bail!(
+                    "Addon requires auth. Run {} first.",
+                    "romance generate auth".bold()
+                );
+            }
+            Ok(())
+        }
+        "validation" => run_addon(&validation::ValidationAddon, project_root),
+        "soft-delete" => run_addon(&soft_delete::SoftDeleteAddon, project_root),
+        "security" => run_addon(&security::SecurityAddon, project_root),
+        "observability" => run_addon(&observability::ObservabilityAddon, project_root),
+        "storage" => run_addon(&storage::StorageAddon, project_root),
+        "search" => run_addon(&search::SearchAddon, project_root),
+        "cache" => run_addon(&cache::CacheAddon, project_root),
+        "email" => run_addon(&email::EmailAddon, project_root),
+        "tasks" => run_addon(&tasks::TasksAddon, project_root),
+        "websocket" => run_addon(&websocket::WebsocketAddon, project_root),
+        "i18n" => run_addon(&i18n::I18nAddon, project_root),
+        "dashboard" => run_addon(&dashboard::DashboardAddon, project_root),
+        "audit-log" => run_addon(&audit_log::AuditLogAddon, project_root),
+        "api-keys" => run_addon(&api_keys::ApiKeysAddon, project_root),
+        _ => anyhow::bail!("Unknown addon dependency: '{}'", name),
+    }
+}
+
 /// Run an addon: check prerequisites, skip if already installed, then install.
 pub fn run_addon(addon: &dyn Addon, project_root: &Path) -> Result<()> {
     addon.check_prerequisites(project_root)?;
@@ -45,10 +79,36 @@ pub fn run_addon(addon: &dyn Addon, project_root: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // Auto-install dependencies
+    let deps = addon.dependencies();
+    if !deps.is_empty() {
+        use colored::Colorize;
+        for dep in &deps {
+            println!("{}", format!("Checking dependency: {}...", dep).dimmed());
+            resolve_and_install_dependency(dep, project_root)?;
+        }
+        println!();
+    }
+
     addon.install(project_root)?;
 
     // Regenerate AI context
     crate::ai_context::regenerate(project_root)?;
+
+    Ok(())
+}
+
+/// Uninstall an addon: check if installed, then uninstall.
+pub fn run_uninstall(addon: &dyn Addon, project_root: &Path) -> Result<()> {
+    if !addon.is_already_installed(project_root) {
+        println!("'{}' is not installed, nothing to remove.", addon.name());
+        return Ok(());
+    }
+
+    addon.uninstall(project_root)?;
+
+    // Regenerate AI context
+    crate::ai_context::regenerate(project_root).ok();
 
     Ok(())
 }
@@ -152,6 +212,83 @@ pub fn update_feature_flag(project_root: &Path, feature: &str, value: bool) -> R
 /// Append an environment variable line to a `.env` file if not already present.
 pub fn append_env_var(path: &Path, line: &str) -> Result<()> {
     crate::generator::auth::append_env_var(path, line)
+}
+
+/// Remove a file if it exists. Returns true if file was removed.
+pub fn remove_file_if_exists(path: &Path) -> Result<bool> {
+    if path.exists() {
+        std::fs::remove_file(path)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Remove a line containing `needle` from a file.
+pub fn remove_line_from_file(path: &Path, needle: &str) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(path)?;
+    let new_content: String = content
+        .lines()
+        .filter(|line| !line.contains(needle))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Preserve trailing newline
+    let new_content = if content.ends_with('\n') {
+        format!("{}\n", new_content)
+    } else {
+        new_content
+    };
+    std::fs::write(path, new_content)?;
+    Ok(())
+}
+
+/// Remove a `mod <name>;` declaration from `backend/src/main.rs`.
+pub fn remove_mod_from_main(project_root: &Path, mod_name: &str) -> Result<()> {
+    let main_path = project_root.join("backend/src/main.rs");
+    remove_line_from_file(&main_path, &format!("mod {};", mod_name))
+}
+
+/// Remove a feature flag from `romance.toml`'s `[features]` section.
+pub fn remove_feature_flag(project_root: &Path, feature: &str) -> Result<()> {
+    let config_path = project_root.join("romance.toml");
+    let line = format!("{} = true", feature);
+    remove_line_from_file(&config_path, &line)?;
+    // Also remove "feature = false" in case
+    let line_false = format!("{} = false", feature);
+    remove_line_from_file(&config_path, &line_false)
+}
+
+/// Remove a TOML section (e.g., `[security]`) and all its contents until the next section.
+pub fn remove_toml_section(project_root: &Path, section_name: &str) -> Result<()> {
+    let config_path = project_root.join("romance.toml");
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&config_path)?;
+    let section_header = format!("[{}]", section_name);
+    if !content.contains(&section_header) {
+        return Ok(());
+    }
+    let mut result_lines: Vec<&str> = Vec::new();
+    let mut skipping = false;
+    for line in content.lines() {
+        if line.trim() == section_header {
+            skipping = true;
+            continue;
+        }
+        if skipping && line.trim().starts_with('[') {
+            skipping = false;
+        }
+        if !skipping {
+            result_lines.push(line);
+        }
+    }
+    let new_content = format!("{}\n", result_lines.join("\n").trim_end());
+    std::fs::write(&config_path, new_content)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -620,18 +757,92 @@ mod tests {
     }
 
     // =========================================================================
-    // D) Uninstall default implementation tests
+    // D) Uninstall helper tests
     // =========================================================================
 
     #[test]
-    fn uninstall_returns_error_by_default() {
+    fn remove_file_if_exists_returns_true_when_file_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let addon = security::SecurityAddon;
-        let result = addon.uninstall(dir.path());
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Uninstall not yet supported"));
-        assert!(err_msg.contains("security"));
+        let path = dir.path().join("test.rs");
+        std::fs::write(&path, "content").unwrap();
+        assert!(remove_file_if_exists(&path).unwrap());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_file_if_exists_returns_false_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nonexistent.rs");
+        assert!(!remove_file_if_exists(&path).unwrap());
+    }
+
+    #[test]
+    fn remove_line_from_file_removes_matching_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.rs");
+        std::fs::write(&path, "mod a;\nmod b;\nmod c;\n").unwrap();
+        remove_line_from_file(&path, "mod b;").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("mod b;"));
+        assert!(content.contains("mod a;"));
+        assert!(content.contains("mod c;"));
+    }
+
+    #[test]
+    fn remove_line_from_file_noop_when_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.rs");
+        std::fs::write(&path, "mod a;\nmod c;\n").unwrap();
+        remove_line_from_file(&path, "mod b;").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("mod a;"));
+        assert!(content.contains("mod c;"));
+    }
+
+    #[test]
+    fn remove_mod_from_main_works() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(
+            dir.path().join("backend/src/main.rs"),
+            "mod errors;\nmod validation;\n// === ROMANCE:MAIN_MODS ===\nmod handlers;\n",
+        )
+        .unwrap();
+        remove_mod_from_main(dir.path(), "validation").unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("backend/src/main.rs")).unwrap();
+        assert!(!content.contains("mod validation;"));
+        assert!(content.contains("mod errors;"));
+    }
+
+    #[test]
+    fn remove_feature_flag_works() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("romance.toml"),
+            "[project]\nname = \"test\"\n[features]\nvalidation = true\ncache = true\n",
+        )
+        .unwrap();
+        remove_feature_flag(dir.path(), "validation").unwrap();
+        let content = std::fs::read_to_string(dir.path().join("romance.toml")).unwrap();
+        assert!(!content.contains("validation"));
+        assert!(content.contains("cache = true"));
+    }
+
+    #[test]
+    fn remove_toml_section_works() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("romance.toml"),
+            "[project]\nname = \"test\"\n\n[security]\nrate_limit = 60\ncors = true\n\n[features]\nauth = true\n",
+        )
+        .unwrap();
+        remove_toml_section(dir.path(), "security").unwrap();
+        let content = std::fs::read_to_string(dir.path().join("romance.toml")).unwrap();
+        assert!(!content.contains("[security]"));
+        assert!(!content.contains("rate_limit"));
+        assert!(content.contains("[features]"));
+        assert!(content.contains("[project]"));
     }
 
     // =========================================================================

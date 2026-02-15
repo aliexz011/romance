@@ -20,6 +20,34 @@ impl Addon for CacheAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_cache(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling caching layer...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/cache.rs"))? {
+            println!("  {} backend/src/cache.rs", "delete".red());
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "cache")?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "cache")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Caching layer uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_cache(project_root: &Path) -> Result<()> {

@@ -20,6 +20,52 @@ impl Addon for I18nAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_i18n(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling i18n (internationalization)...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/i18n.rs"))? {
+            println!("  {} backend/src/i18n.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("frontend/src/lib/i18n.ts"))? {
+            println!("  {} frontend/src/lib/i18n.ts", "delete".red());
+        }
+
+        // Delete locales directory
+        let locales_dir = project_root.join("backend/locales");
+        if locales_dir.exists() {
+            std::fs::remove_dir_all(&locales_dir)?;
+            println!("  {} backend/locales/", "delete".red());
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "i18n")?;
+
+        // Remove locale_middleware from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "locale_middleware",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "i18n")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "i18n (internationalization) uninstalled successfully."
+                .green()
+                .bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_i18n(project_root: &Path) -> Result<()> {

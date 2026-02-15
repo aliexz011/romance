@@ -20,6 +20,51 @@ impl Addon for SearchAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_search(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling full-text search...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/search.rs"))? {
+            println!("  {} backend/src/search.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/handlers/search.rs"))? {
+            println!("  {} backend/src/handlers/search.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/components/SearchBar.tsx"),
+        )? {
+            println!(
+                "  {} frontend/src/components/SearchBar.tsx",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "search")?;
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod search;",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "search")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Full-text search uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_search(project_root: &Path) -> Result<()> {

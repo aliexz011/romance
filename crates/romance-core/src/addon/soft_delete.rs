@@ -22,6 +22,31 @@ impl Addon for SoftDeleteAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_soft_delete(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling soft delete...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/soft_delete.rs"))? {
+            println!("  {} backend/src/soft_delete.rs", "delete".red());
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "soft_delete")?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "soft_delete")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!("{}", "Soft delete uninstalled successfully.".green().bold());
+
+        Ok(())
+    }
 }
 
 fn install_soft_delete(project_root: &Path) -> Result<()> {

@@ -22,6 +22,71 @@ impl Addon for DashboardAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_dashboard(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling dev dashboard...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/handlers/dev_dashboard.rs"),
+        )? {
+            println!(
+                "  {} backend/src/handlers/dev_dashboard.rs",
+                "delete".red()
+            );
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/routes/dev_dashboard.rs"),
+        )? {
+            println!(
+                "  {} backend/src/routes/dev_dashboard.rs",
+                "delete".red()
+            );
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/features/dev/DevDashboard.tsx"),
+        )? {
+            println!(
+                "  {} frontend/src/features/dev/DevDashboard.tsx",
+                "delete".red()
+            );
+        }
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod dev_dashboard;",
+        )?;
+
+        // Remove from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "pub mod dev_dashboard;",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            ".merge(dev_dashboard::router())",
+        )?;
+
+        // Remove from frontend App.tsx (both import and Route)
+        super::remove_line_from_file(
+            &project_root.join("frontend/src/App.tsx"),
+            "DevDashboard",
+        )?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Dev dashboard uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_dashboard(project_root: &Path) -> Result<()> {

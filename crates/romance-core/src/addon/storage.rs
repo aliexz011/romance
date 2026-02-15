@@ -20,6 +20,64 @@ impl Addon for StorageAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_storage(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling file storage...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/storage.rs"))? {
+            println!("  {} backend/src/storage.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/handlers/upload.rs"))? {
+            println!("  {} backend/src/handlers/upload.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/routes/upload.rs"))? {
+            println!("  {} backend/src/routes/upload.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/components/FileUpload.tsx"),
+        )? {
+            println!(
+                "  {} frontend/src/components/FileUpload.tsx",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "storage")?;
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod upload;",
+        )?;
+
+        // Remove from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "pub mod upload;",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            ".merge(upload::router())",
+        )?;
+
+        // Remove [storage] section from romance.toml
+        super::remove_toml_section(project_root, "storage")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "File storage uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_storage(project_root: &Path) -> Result<()> {

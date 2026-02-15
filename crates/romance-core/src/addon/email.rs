@@ -20,6 +20,48 @@ impl Addon for EmailAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_email(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling email system...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/email.rs"))? {
+            println!("  {} backend/src/email.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/handlers/password_reset.rs"),
+        )? {
+            println!(
+                "  {} backend/src/handlers/password_reset.rs",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "email")?;
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod password_reset;",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "email")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Email system uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_email(project_root: &Path) -> Result<()> {

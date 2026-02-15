@@ -76,7 +76,7 @@ pub async fn list(
         }
     }
 {% elif field.rust_type == "Decimal" %}    if let Some(ref v) = params.{{ field.name }} {
-        if let Ok(parsed) = v.parse::<rust_decimal::Decimal>() {
+        if let Ok(parsed) = v.parse::<sea_orm::prelude::Decimal>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }

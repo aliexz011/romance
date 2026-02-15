@@ -22,6 +22,67 @@ impl Addon for AuditLogAddon {
         install_audit_log(project_root)
     }
 
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling audit log...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/audit.rs"))? {
+            println!("  {} backend/src/audit.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/entities/audit_entry.rs"),
+        )? {
+            println!(
+                "  {} backend/src/entities/audit_entry.rs",
+                "delete".red()
+            );
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/handlers/audit_log.rs"),
+        )? {
+            println!("  {} backend/src/handlers/audit_log.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/features/admin/AuditLog.tsx"),
+        )? {
+            println!(
+                "  {} frontend/src/features/admin/AuditLog.tsx",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "audit")?;
+
+        // Remove from entities/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/entities/mod.rs"),
+            "pub mod audit_entry;",
+        )?;
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod audit_log;",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "audit_log")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Audit log uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
+
     fn dependencies(&self) -> Vec<&str> {
         vec!["auth"]
     }

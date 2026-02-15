@@ -29,6 +29,11 @@ pub struct Model {
 {% else %}    #[schema(value_type = String)]
     pub {{ field.name }}: {{ field.rust_type }},
 {% endif -%}
+{% elif field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% else %}    #[schema(value_type = String)]
+    pub {{ field.name }}: {{ field.rust_type }},
+{% endif -%}
 {% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    pub {{ field.name }}: {{ field.rust_type }},
 {% endif -%}
@@ -92,7 +97,7 @@ pub struct Create{{ entity_name }} {
 {% endif %}{% endif -%}
 {% endfor -%}
 {% endif -%}
-{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
     pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
     pub {{ field.name }}: {{ field.rust_type }},
@@ -105,7 +110,7 @@ pub struct Create{{ entity_name }} {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Update{{ entity_name }} {
-{% for field in fields %}{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}    #[schema(value_type = Option<String>)]
+{% for field in fields %}{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}    #[schema(value_type = Option<String>)]
 {% endif %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% endfor %}}
 
@@ -115,7 +120,7 @@ pub struct Update{{ entity_name }} {
 pub struct {{ entity_name }}Response {
     pub id: Uuid,
 {% for field in fields %}
-{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
+{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
     pub {{ field.name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
     pub {{ field.name }}: {{ field.rust_type }},

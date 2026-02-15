@@ -22,6 +22,54 @@ impl Addon for ObservabilityAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_observability(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling observability...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/middleware/request_id.rs"),
+        )? {
+            println!("  {} backend/src/middleware/request_id.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/middleware/tracing_setup.rs"),
+        )? {
+            println!(
+                "  {} backend/src/middleware/tracing_setup.rs",
+                "delete".red()
+            );
+        }
+
+        // Remove lines from middleware/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/middleware/mod.rs"),
+            "request_id",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/middleware/mod.rs"),
+            "tracing_setup",
+        )?;
+
+        // Remove request_id_layer from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "request_id_layer",
+        )?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Observability uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_observability(project_root: &Path) -> Result<()> {

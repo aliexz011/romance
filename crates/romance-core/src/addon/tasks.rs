@@ -20,6 +20,52 @@ impl Addon for TasksAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_tasks(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling background tasks...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/tasks.rs"))? {
+            println!("  {} backend/src/tasks.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/scheduler.rs"))? {
+            println!("  {} backend/src/scheduler.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/entities/background_task.rs"),
+        )? {
+            println!(
+                "  {} backend/src/entities/background_task.rs",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declarations from main.rs
+        super::remove_mod_from_main(project_root, "tasks")?;
+        super::remove_mod_from_main(project_root, "scheduler")?;
+
+        // Remove from entities/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/entities/mod.rs"),
+            "pub mod background_task;",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "background_tasks")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Background tasks uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_tasks(project_root: &Path) -> Result<()> {

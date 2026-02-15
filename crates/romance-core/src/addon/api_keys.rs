@@ -22,6 +22,33 @@ impl Addon for ApiKeysAddon {
         install_api_keys(project_root)
     }
 
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling API key authentication...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/api_keys.rs"))? {
+            println!("  {} backend/src/api_keys.rs", "delete".red());
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "api_keys")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "API key authentication uninstalled successfully."
+                .green()
+                .bold()
+        );
+
+        Ok(())
+    }
+
     fn dependencies(&self) -> Vec<&str> {
         vec!["auth"]
     }

@@ -24,6 +24,58 @@ impl Addon for OauthAddon {
         install_oauth(project_root, &self.provider)
     }
 
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling OAuth...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/oauth.rs"))? {
+            println!("  {} backend/src/oauth.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/handlers/oauth.rs"))? {
+            println!("  {} backend/src/handlers/oauth.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(&project_root.join("backend/src/routes/oauth.rs"))? {
+            println!("  {} backend/src/routes/oauth.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/features/auth/OAuthButton.tsx"),
+        )? {
+            println!(
+                "  {} frontend/src/features/auth/OAuthButton.tsx",
+                "delete".red()
+            );
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "oauth")?;
+
+        // Remove from handlers/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/handlers/mod.rs"),
+            "pub mod oauth;",
+        )?;
+
+        // Remove from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "pub mod oauth;",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            ".merge(oauth::router())",
+        )?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!("{}", "OAuth uninstalled successfully.".green().bold());
+
+        Ok(())
+    }
+
     fn dependencies(&self) -> Vec<&str> {
         vec!["auth"]
     }

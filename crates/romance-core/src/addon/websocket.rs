@@ -20,6 +20,45 @@ impl Addon for WebsocketAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_websocket(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling WebSocket support...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(&project_root.join("backend/src/ws.rs"))? {
+            println!("  {} backend/src/ws.rs", "delete".red());
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("frontend/src/lib/useWebSocket.ts"),
+        )? {
+            println!("  {} frontend/src/lib/useWebSocket.ts", "delete".red());
+        }
+
+        // Remove mod declaration from main.rs
+        super::remove_mod_from_main(project_root, "ws")?;
+
+        // Remove ws_handler route from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "ws_handler",
+        )?;
+
+        // Remove feature flag
+        super::remove_feature_flag(project_root, "websocket")?;
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "WebSocket support uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_websocket(project_root: &Path) -> Result<()> {

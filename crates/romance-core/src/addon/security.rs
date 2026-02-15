@@ -22,6 +22,64 @@ impl Addon for SecurityAddon {
     fn install(&self, project_root: &Path) -> Result<()> {
         install_security(project_root)
     }
+
+    fn uninstall(&self, project_root: &Path) -> Result<()> {
+        use colored::Colorize;
+
+        println!("{}", "Uninstalling security middleware...".bold());
+
+        // Delete files
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/middleware/security_headers.rs"),
+        )? {
+            println!(
+                "  {} backend/src/middleware/security_headers.rs",
+                "delete".red()
+            );
+        }
+        if super::remove_file_if_exists(
+            &project_root.join("backend/src/middleware/rate_limit.rs"),
+        )? {
+            println!("  {} backend/src/middleware/rate_limit.rs", "delete".red());
+        }
+
+        // Remove middleware lines from routes/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "security_headers",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/routes/mod.rs"),
+            "rate_limit_middleware",
+        )?;
+
+        // Remove lines from middleware/mod.rs
+        super::remove_line_from_file(
+            &project_root.join("backend/src/middleware/mod.rs"),
+            "security_headers",
+        )?;
+        super::remove_line_from_file(
+            &project_root.join("backend/src/middleware/mod.rs"),
+            "rate_limit",
+        )?;
+
+        // Remove [security] section from romance.toml
+        super::remove_toml_section(project_root, "security")?;
+
+        // NOTE: Don't remove middleware/mod.rs or mod middleware; from main.rs
+        // as observability may also use the middleware module.
+
+        // Regenerate AI context
+        crate::ai_context::regenerate(project_root).ok();
+
+        println!();
+        println!(
+            "{}",
+            "Security middleware uninstalled successfully.".green().bold()
+        );
+
+        Ok(())
+    }
 }
 
 fn install_security(project_root: &Path) -> Result<()> {
