@@ -15,6 +15,7 @@ pub fn regenerate(project_root: &Path) -> Result<()> {
 
     sections.push(generate_header(project_root));
     sections.push(generate_stack_section());
+    sections.push(generate_cli_reference_section());
 
     let entities = scan_entities(project_root)?;
     if !entities.is_empty() {
@@ -93,6 +94,74 @@ fn generate_stack_section() -> String {
 - **API pattern:** REST with JSON envelope `{success, data?, meta?, error?}`
 - **Auth:** JWT (jsonwebtoken + argon2) — Bearer token in Authorization header
 - **DB:** PostgreSQL with SeaORM migrations"#
+        .to_string()
+}
+
+fn generate_cli_reference_section() -> String {
+    r#"## Romance CLI Reference
+
+### Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `romance new <name>` | Create new full-stack project | `romance new my-app` |
+| `romance generate entity <name> [fields...]` | Generate CRUD entity | `romance generate entity Product title:string price:decimal` |
+| `romance generate auth` | Add JWT authentication | `romance generate auth` |
+| `romance generate admin` | Add admin panel (requires auth) | `romance generate admin` |
+| `romance add <addon>` | Install addon | `romance add validation` |
+| `romance dev` | Run backend + frontend dev servers | `romance dev` |
+| `romance db migrate` | Run pending migrations | `romance db migrate` |
+| `romance db rollback` | Rollback last migration | `romance db rollback` |
+| `romance db seed` | Run seed data | `romance db seed` |
+| `romance test` | Run tests with temp database | `romance test` |
+| `romance check` | Run cargo check + tsc | `romance check` |
+| `romance update` | Update scaffold to latest templates | `romance update` |
+
+### Field Syntax
+
+- `name:type` — required field: `title:string`
+- `name:type?` — optional field: `description:text?`
+- `name:type->Entity` — foreign key: `author_id:uuid->User`
+- `name:has_many->Entity` — has-many relation: `posts:has_many->Post`
+- `name:m2m->Entity` — many-to-many: `tags:m2m->Tag`
+
+### Field Types
+
+| Type | Aliases | Rust | TypeScript |
+|------|---------|------|------------|
+| `string` | `str` | `String` | `string` |
+| `text` | — | `String` | `string` |
+| `bool` | `boolean` | `bool` | `boolean` |
+| `int` | `i32`, `int32`, `integer` | `i32` | `number` |
+| `bigint` | `i64`, `int64` | `i64` | `number` |
+| `float` | `f64`, `float64`, `double` | `f64` | `number` |
+| `decimal` | `money` | `Decimal` | `number` |
+| `uuid` | — | `Uuid` | `string` |
+| `datetime` | `timestamp` | `DateTimeWithTimeZone` | `string` |
+| `date` | — | `Date` | `string` |
+| `json` | `jsonb` | `Json` | `unknown` |
+| `file` | — | `String` (URL) | `string` |
+| `image` | — | `String` (URL) | `string` |
+
+### Validation Syntax
+
+Append `[rules]` to field type: `name:string[min=3,max=100]`, `email:string[email]`, `title:string[searchable]`
+
+Available rules: `min=N`, `max=N`, `email`, `url`, `searchable`
+
+### Available Addons
+
+| Addon | Command | What it adds |
+|-------|---------|-------------|
+| validation | `romance add validation` | Backend `validator` + frontend Zod schemas |
+| security | `romance add security` | Rate limiting + security headers |
+| observability | `romance add observability` | Structured tracing + request ID |
+| storage | `romance add storage` | File/image upload endpoints |
+| soft-delete | `romance add soft-delete` | Soft delete with restore |
+| audit-log | `romance add audit-log` | CUD operation logging (requires auth) |
+| search | `romance add search` | PostgreSQL full-text search |
+| oauth | `romance add oauth <provider>` | Social auth (google, github, discord) |
+| dashboard | `romance add dashboard` | Dev dashboard at /dev |"#
         .to_string()
 }
 

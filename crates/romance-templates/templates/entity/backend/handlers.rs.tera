@@ -9,7 +9,7 @@ use crate::api::{ok, ok_page, ApiResponse};
 use crate::errors::AppResult;
 use crate::pagination::{PageMeta, PageRequest};
 use crate::routes::AppState;
-{% if has_auth %}use crate::auth::AuthUser;
+{% if has_auth and not has_multitenancy %}use crate::auth::AuthUser;
 {% endif %}{% if has_multitenancy %}use crate::tenant::TenantGuard;
 {% endif %}
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]

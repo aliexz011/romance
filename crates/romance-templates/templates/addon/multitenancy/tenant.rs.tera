@@ -26,9 +26,9 @@ where
         let tenant_id = claims
             .tenant_id
             .as_ref()
-            .ok_or_else(|| AppError::BadRequest("Missing tenant_id in token".into()))?
+            .ok_or_else(|| AppError::Validation("Missing tenant_id in token".into()))?
             .parse::<Uuid>()
-            .map_err(|_| AppError::BadRequest("Invalid tenant_id in token".into()))?;
+            .map_err(|_| AppError::Validation("Invalid tenant_id in token".into()))?;
 
         Ok(TenantGuard { claims, tenant_id })
     }
@@ -39,7 +39,7 @@ pub fn current_tenant_id(claims: &Claims) -> Result<Uuid, AppError> {
     claims
         .tenant_id
         .as_ref()
-        .ok_or_else(|| AppError::BadRequest("Missing tenant_id in token".into()))?
+        .ok_or_else(|| AppError::Validation("Missing tenant_id in token".into()))?
         .parse::<Uuid>()
-        .map_err(|_| AppError::BadRequest("Invalid tenant_id in token".into()))
+        .map_err(|_| AppError::Validation("Invalid tenant_id in token".into()))
 }
