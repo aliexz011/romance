@@ -66,8 +66,15 @@ impl Addon for SecurityAddon {
         // Remove [security] section from romance.toml
         super::remove_toml_section(project_root, "security")?;
 
-        // NOTE: Don't remove middleware/mod.rs or mod middleware; from main.rs
-        // as observability may also use the middleware module.
+        // Clean up middleware module if observability doesn't use it
+        let observability_installed = project_root
+            .join("backend/src/middleware/request_id.rs")
+            .exists();
+        if !observability_installed {
+            super::remove_file_if_exists(&project_root.join("backend/src/middleware/mod.rs"))?;
+            let _ = std::fs::remove_dir(project_root.join("backend/src/middleware"));
+            super::remove_mod_from_main(project_root, "middleware")?;
+        }
 
         // Regenerate AI context
         crate::ai_context::regenerate(project_root).ok();
@@ -144,7 +151,7 @@ fn install_security(project_root: &Path) -> Result<()> {
         &[
             ("tower", r#"{ version = "0.5", features = ["limit", "timeout"] }"#),
             ("governor", r#""0.7""#),
-            ("tower-governor", r#""0.5""#),
+            ("tower_governor", r#""0.5""#),
             ("base64", r#""0.22""#),
         ],
     )?;

@@ -59,6 +59,16 @@ impl Addon for ObservabilityAddon {
             "request_id_layer",
         )?;
 
+        // Clean up middleware module if security doesn't use it
+        let security_installed = project_root
+            .join("backend/src/middleware/security_headers.rs")
+            .exists();
+        if !security_installed {
+            super::remove_file_if_exists(&project_root.join("backend/src/middleware/mod.rs"))?;
+            let _ = std::fs::remove_dir(project_root.join("backend/src/middleware"));
+            super::remove_mod_from_main(project_root, "middleware")?;
+        }
+
         // Regenerate AI context
         crate::ai_context::regenerate(project_root).ok();
 
