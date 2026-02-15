@@ -11,12 +11,30 @@ pub struct Model {
     #[serde(skip_serializing)]
     pub password_hash: String,
     pub role: String,
+{% if has_multitenancy %}    pub tenant_id: Uuid,
+{% endif %}
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+{% if has_multitenancy %}    #[sea_orm(
+        belongs_to = "super::tenant::Entity",
+        from = "Column::TenantId",
+        to = "super::tenant::Column::Id"
+    )]
+    Tenant,
+{% endif %}
+}
+
+{% if has_multitenancy %}
+impl Related<super::tenant::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Tenant.def()
+    }
+}
+{% endif %}
 
 impl ActiveModelBehavior for ActiveModel {}
 
@@ -26,6 +44,8 @@ impl ActiveModelBehavior for ActiveModel {}
 pub struct CreateUser {
     pub email: String,
     pub password: String,
+{% if has_multitenancy %}    pub tenant_id: Option<Uuid>,
+{% endif %}
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +53,8 @@ pub struct UserPublic {
     pub id: Uuid,
     pub email: String,
     pub role: String,
+{% if has_multitenancy %}    pub tenant_id: Uuid,
+{% endif %}
     pub created_at: DateTimeWithTimeZone,
 }
 

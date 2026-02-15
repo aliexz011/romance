@@ -1,0 +1,13 @@
+use axum::{
+    routing::{get, post},
+    Router,
+};
+
+use crate::handlers::tenant as handlers;
+use crate::routes::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/tenants", post(handlers::create_tenant).get(handlers::list_tenants))
+        .route("/api/tenants/{id}", get(handlers::get_tenant))
+}

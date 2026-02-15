@@ -1,0 +1,45 @@
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use uuid::Uuid;
+
+use crate::auth::{AuthUser, Claims};
+use crate::errors::AppError;
+
+/// Extractor that validates JWT and extracts the tenant_id claim.
+/// Use this in handlers that need tenant-scoped data access.
+///
+/// Returns 401 if not authenticated, 400 if tenant_id is missing from claims.
+pub struct TenantGuard {
+    pub claims: Claims,
+    pub tenant_id: Uuid,
+}
+
+impl<S> FromRequestParts<S> for TenantGuard
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let AuthUser(claims) = AuthUser::from_request_parts(parts, state).await?;
+
+        let tenant_id = claims
+            .tenant_id
+            .as_ref()
+            .ok_or_else(|| AppError::BadRequest("Missing tenant_id in token".into()))?
+            .parse::<Uuid>()
+            .map_err(|_| AppError::BadRequest("Invalid tenant_id in token".into()))?;
+
+        Ok(TenantGuard { claims, tenant_id })
+    }
+}
+
+/// Helper to extract the current tenant ID from claims.
+pub fn current_tenant_id(claims: &Claims) -> Result<Uuid, AppError> {
+    claims
+        .tenant_id
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("Missing tenant_id in token".into()))?
+        .parse::<Uuid>()
+        .map_err(|_| AppError::BadRequest("Invalid tenant_id in token".into()))
+}

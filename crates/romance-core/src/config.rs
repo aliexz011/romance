@@ -76,6 +76,8 @@ pub struct FeaturesConfig {
     pub audit_log: bool,
     #[serde(default)]
     pub search: bool,
+    #[serde(default)]
+    pub multitenancy: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -213,6 +215,7 @@ impl RomanceConfig {
             "soft_delete" => self.features.soft_delete,
             "audit_log" => self.features.audit_log,
             "search" => self.features.search,
+            "multitenancy" => self.features.multitenancy,
             _ => false,
         }
     }

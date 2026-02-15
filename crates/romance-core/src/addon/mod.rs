@@ -4,6 +4,7 @@ pub mod cache;
 pub mod dashboard;
 pub mod email;
 pub mod i18n;
+pub mod multitenancy;
 pub mod oauth;
 pub mod observability;
 pub mod search;
@@ -66,6 +67,7 @@ fn resolve_and_install_dependency(name: &str, project_root: &Path) -> Result<()>
         "dashboard" => run_addon(&dashboard::DashboardAddon, project_root),
         "audit-log" => run_addon(&audit_log::AuditLogAddon, project_root),
         "api-keys" => run_addon(&api_keys::ApiKeysAddon, project_root),
+        "multitenancy" => run_addon(&multitenancy::MultitenancyAddon, project_root),
         _ => anyhow::bail!("Unknown addon dependency: '{}'", name),
     }
 }
@@ -392,6 +394,12 @@ mod tests {
     }
 
     #[test]
+    fn multitenancy_addon_name() {
+        let addon = multitenancy::MultitenancyAddon;
+        assert_eq!(addon.name(), "multitenancy");
+    }
+
+    #[test]
     fn oauth_addon_name() {
         let addon = oauth::OauthAddon {
             provider: "google".to_string(),
@@ -492,6 +500,26 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
         std::fs::write(dir.path().join("backend/src/auth.rs"), "").unwrap();
         let result = audit_log::AuditLogAddon.check_prerequisites(dir.path());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn multitenancy_prerequisites_fail_without_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        write_romance_toml(dir.path());
+        let result = multitenancy::MultitenancyAddon.check_prerequisites(dir.path());
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Auth must be generated first"));
+    }
+
+    #[test]
+    fn multitenancy_prerequisites_pass_with_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        write_romance_toml(dir.path());
+        std::fs::create_dir_all(dir.path().join("backend/src")).unwrap();
+        std::fs::write(dir.path().join("backend/src/auth.rs"), "").unwrap();
+        let result = multitenancy::MultitenancyAddon.check_prerequisites(dir.path());
         assert!(result.is_ok());
     }
 
@@ -736,6 +764,21 @@ mod tests {
     }
 
     #[test]
+    fn multitenancy_not_installed_in_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!multitenancy::MultitenancyAddon.is_already_installed(dir.path()));
+    }
+
+    #[test]
+    fn multitenancy_installed_when_marker_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend_src = dir.path().join("backend/src");
+        std::fs::create_dir_all(&backend_src).unwrap();
+        std::fs::write(backend_src.join("tenant.rs"), "").unwrap();
+        assert!(multitenancy::MultitenancyAddon.is_already_installed(dir.path()));
+    }
+
+    #[test]
     fn oauth_not_installed_in_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
         let addon = oauth::OauthAddon {
@@ -866,6 +909,12 @@ mod tests {
     #[test]
     fn api_keys_depends_on_auth() {
         let addon = api_keys::ApiKeysAddon;
+        assert_eq!(addon.dependencies(), vec!["auth"]);
+    }
+
+    #[test]
+    fn multitenancy_depends_on_auth() {
+        let addon = multitenancy::MultitenancyAddon;
         assert_eq!(addon.dependencies(), vec!["auth"]);
     }
 

@@ -38,7 +38,8 @@ pub struct Model {
 {% else %}    pub {{ field.name }}: {{ field.rust_type }},
 {% endif -%}
 {% endif -%}
-{% endfor %}    #[schema(value_type = String)]
+{% endfor %}{% if has_multitenancy %}    pub tenant_id: Uuid,
+{% endif %}    #[schema(value_type = String)]
     pub created_at: DateTimeWithTimeZone,
     #[schema(value_type = String)]
     pub updated_at: DateTimeWithTimeZone,
@@ -57,7 +58,13 @@ pub enum Relation {
     )]
     {{ field.relation }},
 {% endif -%}
-{% endfor %}}
+{% endfor %}{% if has_multitenancy %}    #[sea_orm(
+        belongs_to = "super::tenant::Entity",
+        from = "Column::TenantId",
+        to = "super::tenant::Column::Id"
+    )]
+    Tenant,
+{% endif %}}
 
 {% for field in fields -%}
 {% if field.relation %}
@@ -68,6 +75,13 @@ impl Related<super::{{ field.relation | snake_case }}::Entity> for Entity {
 }
 {% endif -%}
 {% endfor %}
+{% if has_multitenancy %}
+impl Related<super::tenant::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Tenant.def()
+    }
+}
+{% endif %}
 
 impl ActiveModelBehavior for ActiveModel {}
 

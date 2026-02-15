@@ -81,3 +81,8 @@ pub fn run_api_keys() -> Result<()> {
     let project_root = Path::new(".");
     addon::run_addon(&addon::api_keys::ApiKeysAddon, project_root)
 }
+
+pub fn run_multitenancy() -> Result<()> {
+    let project_root = Path::new(".");
+    addon::run_addon(&addon::multitenancy::MultitenancyAddon, project_root)
+}

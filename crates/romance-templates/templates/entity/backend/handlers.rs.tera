@@ -10,6 +10,7 @@ use crate::errors::AppResult;
 use crate::pagination::{PageMeta, PageRequest};
 use crate::routes::AppState;
 {% if has_auth %}use crate::auth::AuthUser;
+{% endif %}{% if has_multitenancy %}use crate::tenant::TenantGuard;
 {% endif %}
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct ListParams {
@@ -39,7 +40,8 @@ pub struct IncludeQuery {
     tag = "{{ entity_name }}"
 )]
 pub async fn list(
-    State(state): State<AppState>,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% endif %}    State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
     let page = params.page.page();
@@ -47,6 +49,8 @@ pub async fn list(
 
     let mut query = Entity::find();
 
+{% if has_multitenancy %}    query = query.filter(Column::TenantId.eq(tenant.tenant_id));
+{% endif %}
 {% if soft_delete %}    query = query.filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null());
 {% endif %}
     // Apply field filters
@@ -125,12 +129,24 @@ pub async fn list(
     tag = "{{ entity_name }}"
 )]
 pub async fn get(
-    State(state): State<AppState>,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(include_query): Query<IncludeQuery>,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
-{% if soft_delete %}    let item = Entity::find_by_id(id)
+{% if soft_delete %}{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}{% else %}{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
@@ -138,7 +154,7 @@ pub async fn get(
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
-{% endif %}
+{% endif %}{% endif %}
 
     // If ?include= is present, fetch related entities and return DetailResponse
     if let Some(ref include_str) = include_query.include {
@@ -183,11 +199,23 @@ pub async fn get(
     tag = "{{ entity_name }}"
 )]
 pub async fn get(
-    State(state): State<AppState>,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
-{% if soft_delete %}    let item = Entity::find_by_id(id)
+{% if soft_delete %}{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}{% else %}{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
@@ -195,7 +223,7 @@ pub async fn get(
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
-{% endif %}
+{% endif %}{% endif %}
 
     Ok(ok({{ entity_name }}Response::from(item)))
 }
@@ -211,7 +239,8 @@ pub async fn get(
     tag = "{{ entity_name }}"
 )]
 pub async fn create(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
 {% if has_validation %}    crate::validation::ValidatedJson(input): crate::validation::ValidatedJson<Create{{ entity_name }}>,
 {% else %}    axum::Json(input): axum::Json<Create{{ entity_name }}>,
@@ -230,7 +259,8 @@ pub async fn create(
     let model = ActiveModel {
         id: Set(id),
 {% for field in fields %}        {{ field.name }}: Set(input.{{ field.name }}),
-{% endfor %}        created_at: Set(now),
+{% endfor %}{% if has_multitenancy %}        tenant_id: Set(tenant.tenant_id),
+{% endif %}        created_at: Set(now),
         updated_at: Set(now),
 {% if soft_delete %}        deleted_at: Set(None),
 {% endif %}
@@ -241,7 +271,7 @@ pub async fn create(
 
 {% if has_audit %}    // Audit log
     if let Ok(data) = serde_json::to_value(&result) {
-        let _ = crate::audit::AuditLogger::log_create(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &data).await;
+        let _ = crate::audit::AuditLogger::log_create(&state.db, "{{ entity_name }}", id, {% if has_multitenancy %}tenant.claims.user_id().ok(){% elif has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &data).await;
     }
 {% endif %}
 
@@ -270,15 +300,22 @@ pub async fn create(
     tag = "{{ entity_name }}"
 )]
 pub async fn update(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
     axum::Json(input): axum::Json<Update{{ entity_name }}>,
 ) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
-    let item = Entity::find_by_id(id)
+{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}
 
     let now = chrono::Utc::now().fixed_offset();
     let mut model: ActiveModel = item.into();
@@ -306,7 +343,7 @@ pub async fn update(
 
 {% if has_audit %}    // Audit log
     if let Ok(changes) = serde_json::to_value(&input) {
-        let _ = crate::audit::AuditLogger::log_update(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &changes).await;
+        let _ = crate::audit::AuditLogger::log_update(&state.db, "{{ entity_name }}", id, {% if has_multitenancy %}tenant.claims.user_id().ok(){% elif has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}, &changes).await;
     }
 {% endif %}
 
@@ -335,14 +372,21 @@ pub async fn update(
     tag = "{{ entity_name }}"
 )]
 pub async fn delete(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<ApiResponse<()>> {
-    let item = Entity::find_by_id(id)
+{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}
 
     let now = chrono::Utc::now().fixed_offset();
     let mut model: ActiveModel = item.into();
@@ -356,7 +400,7 @@ pub async fn delete(
 
     model.update(&state.db).await?;
 
-{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
+{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_multitenancy %}tenant.claims.user_id().ok(){% elif has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
 {% endif %}
 
     // Emit entity deleted event
@@ -369,14 +413,21 @@ pub async fn delete(
 }
 
 pub async fn restore(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<ApiResponse<{{ entity_name }}Response>> {
-    let item = Entity::find_by_id(id)
+{% if has_multitenancy %}    let item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
         .one(&state.db)
         .await?
         .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% else %}    let item = Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
+{% endif %}
 
     let mut model: ActiveModel = item.into();
     model.deleted_at = Set(None);
@@ -387,11 +438,19 @@ pub async fn restore(
 }
 
 pub async fn force_delete(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<ApiResponse<()>> {
+{% if has_multitenancy %}    let _item = Entity::find_by_id(id)
+        .filter(Column::TenantId.eq(tenant.tenant_id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)))?;
     let result = Entity::delete_by_id(id).exec(&state.db).await?;
+{% else %}    let result = Entity::delete_by_id(id).exec(&state.db).await?;
+{% endif %}
 
     if result.rows_affected == 0 {
         return Err(crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)));
@@ -412,7 +471,8 @@ pub async fn force_delete(
     tag = "{{ entity_name }}"
 )]
 pub async fn delete(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> AppResult<ApiResponse<()>> {
@@ -422,13 +482,19 @@ pub async fn delete(
         entity_id: id.to_string(),
     });
 
-    let result = Entity::delete_by_id(id).exec(&state.db).await?;
+{% if has_multitenancy %}    let result = Entity::delete_many()
+        .filter(Column::Id.eq(id))
+        .filter(Column::TenantId.eq(tenant.tenant_id))
+        .exec(&state.db)
+        .await?;
+{% else %}    let result = Entity::delete_by_id(id).exec(&state.db).await?;
+{% endif %}
 
     if result.rows_affected == 0 {
         return Err(crate::errors::AppError::NotFound(format!("{{ entity_name }} {} not found", id)));
     }
 
-{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
+{% if has_audit %}    let _ = crate::audit::AuditLogger::log_delete(&state.db, "{{ entity_name }}", id, {% if has_multitenancy %}tenant.claims.user_id().ok(){% elif has_auth %}_auth.0.user_id().ok(){% else %}None{% endif %}).await;
 {% endif %}
 
     // Emit entity deleted event
@@ -458,7 +524,8 @@ pub struct SearchQuery {
     tag = "{{ entity_name }}"
 )]
 pub async fn search(
-    State(state): State<AppState>,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% endif %}    State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
     use sea_orm::QueryOrder;
@@ -478,20 +545,17 @@ pub async fn search(
 {% endif -%}
 {% endfor %}
 
-{% if soft_delete %}    let results: Vec<{{ entity_name }}Response> = Entity::find()
-        .filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null())
-        .filter(condition)
-        .limit(limit)
-        .all(&state.db)
-        .await?
-        .into_iter().map(Into::into).collect();
-{% else %}    let results: Vec<{{ entity_name }}Response> = Entity::find()
-        .filter(condition)
-        .limit(limit)
-        .all(&state.db)
-        .await?
-        .into_iter().map(Into::into).collect();
+    let mut search_query = Entity::find();
+{% if has_multitenancy %}    search_query = search_query.filter(Column::TenantId.eq(tenant.tenant_id));
 {% endif %}
+{% if soft_delete %}    search_query = search_query.filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null());
+{% endif %}
+    let results: Vec<{{ entity_name }}Response> = search_query
+        .filter(condition)
+        .limit(limit)
+        .all(&state.db)
+        .await?
+        .into_iter().map(Into::into).collect();
 
     Ok(ok(results))
 }
@@ -507,7 +571,8 @@ pub async fn search(
     tag = "{{ entity_name }}"
 )]
 pub async fn bulk_create(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     axum::Json(input): axum::Json<BulkCreate{{ entity_name }}>,
 ) -> AppResult<ApiResponse<Vec<{{ entity_name }}Response>>> {
@@ -518,7 +583,8 @@ pub async fn bulk_create(
         let model = ActiveModel {
             id: Set(id),
 {% for field in fields %}            {{ field.name }}: Set(item.{{ field.name }}),
-{% endfor %}            created_at: Set(now),
+{% endfor %}{% if has_multitenancy %}            tenant_id: Set(tenant.tenant_id),
+{% endif %}            created_at: Set(now),
             updated_at: Set(now),
 {% if soft_delete %}            deleted_at: Set(None),
 {% endif %}
@@ -540,18 +606,23 @@ pub async fn bulk_create(
     tag = "{{ entity_name }}"
 )]
 pub async fn bulk_delete(
-{% if has_auth %}    _auth: AuthUser,
+{% if has_multitenancy %}    tenant: TenantGuard,
+{% elif has_auth %}    _auth: AuthUser,
 {% endif %}    State(state): State<AppState>,
     axum::Json(input): axum::Json<BulkDelete>,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
 {% if soft_delete %}    let now = chrono::Utc::now().fixed_offset();
-    let result = Entity::update_many()
-        .filter(Column::Id.is_in(input.ids))
+    let mut bulk_query = Entity::update_many()
+        .filter(Column::Id.is_in(input.ids));
+{% if has_multitenancy %}    bulk_query = bulk_query.filter(Column::TenantId.eq(tenant.tenant_id));
+{% endif %}    let result = bulk_query
         .col_expr(Column::DeletedAt, Expr::value(Some(now)))
         .exec(&state.db)
         .await?;
-{% else %}    let result = Entity::delete_many()
-        .filter(Column::Id.is_in(input.ids))
+{% else %}    let mut bulk_query = Entity::delete_many()
+        .filter(Column::Id.is_in(input.ids));
+{% if has_multitenancy %}    bulk_query = bulk_query.filter(Column::TenantId.eq(tenant.tenant_id));
+{% endif %}    let result = bulk_query
         .exec(&state.db)
         .await?;
 {% endif %}

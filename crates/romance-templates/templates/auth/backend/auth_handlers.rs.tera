@@ -41,24 +41,54 @@ pub async fn register(
     let now = chrono::Utc::now().fixed_offset();
     let user_id = Uuid::new_v4();
 
+{% if has_multitenancy %}    // Resolve tenant: use provided tenant_id or create a default tenant
+    let tenant_id = if let Some(tid) = input.tenant_id {
+        // Verify the tenant exists
+        crate::entities::tenant::Entity::find_by_id(tid)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Tenant not found".into()))?;
+        tid
+    } else {
+        // Create a default tenant for this user
+        let tid = Uuid::new_v4();
+        let tenant_model = crate::entities::tenant::ActiveModel {
+            id: Set(tid),
+            name: Set(format!("{}'s Organization", input.email)),
+            slug: Set(format!("org-{}", user_id)),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        tenant_model.insert(&state.db).await?;
+        tid
+    };
+
+{% endif %}
     let model = user::ActiveModel {
         id: Set(user_id),
         email: Set(input.email.clone()),
         password_hash: Set(password_hash),
         role: Set("user".to_string()),
+{% if has_multitenancy %}        tenant_id: Set(tenant_id),
+{% endif %}
         created_at: Set(now),
         updated_at: Set(now),
     };
 
     let created = model.insert(&state.db).await?;
 
-    let token = auth::create_token(created.id, &created.email, &created.role)
+{% if has_multitenancy %}    let token = auth::create_token(created.id, &created.email, &created.role, Some(created.tenant_id))
         .map_err(|e| AppError::Internal(e))?;
+{% else %}    let token = auth::create_token(created.id, &created.email, &created.role)
+        .map_err(|e| AppError::Internal(e))?;
+{% endif %}
 
     let user_public = UserPublic {
         id: created.id,
         email: created.email,
         role: created.role,
+{% if has_multitenancy %}        tenant_id: created.tenant_id,
+{% endif %}
         created_at: created.created_at,
     };
 
@@ -85,13 +115,18 @@ pub async fn login(
         return Err(AppError::Unauthorized("Invalid email or password".into()));
     }
 
-    let token = auth::create_token(user.id, &user.email, &user.role)
+{% if has_multitenancy %}    let token = auth::create_token(user.id, &user.email, &user.role, Some(user.tenant_id))
         .map_err(|e| AppError::Internal(e))?;
+{% else %}    let token = auth::create_token(user.id, &user.email, &user.role)
+        .map_err(|e| AppError::Internal(e))?;
+{% endif %}
 
     let user_public = UserPublic {
         id: user.id,
         email: user.email,
         role: user.role,
+{% if has_multitenancy %}        tenant_id: user.tenant_id,
+{% endif %}
         created_at: user.created_at,
     };
 
@@ -117,6 +152,8 @@ pub async fn me(
         id: user.id,
         email: user.email,
         role: user.role,
+{% if has_multitenancy %}        tenant_id: user.tenant_id,
+{% endif %}
         created_at: user.created_at,
     };
 
@@ -150,6 +187,8 @@ pub async fn update_role(
         id: updated.id,
         email: updated.email,
         role: updated.role,
+{% if has_multitenancy %}        tenant_id: updated.tenant_id,
+{% endif %}
         created_at: updated.created_at,
     }))
 }
@@ -170,6 +209,8 @@ pub async fn list_users(
             id: u.id,
             email: u.email,
             role: u.role,
+{% if has_multitenancy %}            tenant_id: u.tenant_id,
+{% endif %}
             created_at: u.created_at,
         })
         .collect();

@@ -1,0 +1,87 @@
+use sea_orm_migration::prelude::*;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Add tenant_id column to users table
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
+                    .add_column(ColumnDef::new(Users::TenantId).uuid().not_null())
+                    .to_owned(),
+            )
+            .await?;
+
+        // Add foreign key to tenants table
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("fk_users_tenant_id")
+                    .from(Users::Table, Users::TenantId)
+                    .to(Tenants::Table, Tenants::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+
+        // Add index for tenant_id lookups
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_users_tenant_id")
+                    .table(Users::Table)
+                    .col(Users::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_index(
+                Index::drop()
+                    .name("idx_users_tenant_id")
+                    .table(Users::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .drop_foreign_key(
+                ForeignKey::drop()
+                    .name("fk_users_tenant_id")
+                    .table(Users::Table)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Users::Table)
+                    .drop_column(Users::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[derive(DeriveIden)]
+enum Users {
+    Table,
+    TenantId,
+}
+
+#[derive(DeriveIden)]
+enum Tenants {
+    Table,
+    Id,
+}

@@ -143,6 +143,8 @@ pub enum AddCommands {
     Websocket,
     /// Add API key authentication for machine-to-machine auth
     ApiKeys,
+    /// Add row-level multitenancy (tenant_id on all entities, JWT tenant resolution)
+    Multitenancy,
 }
 
 #[derive(Subcommand)]
@@ -177,6 +179,8 @@ pub enum RemoveCommands {
     Websocket,
     /// Remove API key authentication addon
     ApiKeys,
+    /// Remove multitenancy addon
+    Multitenancy,
 }
 
 #[derive(Subcommand)]
@@ -234,6 +238,7 @@ pub fn run(cli: Cli) -> Result<()> {
             AddCommands::Tasks => add::run_tasks(),
             AddCommands::Websocket => add::run_websocket(),
             AddCommands::ApiKeys => add::run_api_keys(),
+            AddCommands::Multitenancy => add::run_multitenancy(),
         },
         Commands::Remove { command } => match command {
             RemoveCommands::Validation => remove::run_validation(),
@@ -251,6 +256,7 @@ pub fn run(cli: Cli) -> Result<()> {
             RemoveCommands::Tasks => remove::run_tasks(),
             RemoveCommands::Websocket => remove::run_websocket(),
             RemoveCommands::ApiKeys => remove::run_api_keys(),
+            RemoveCommands::Multitenancy => remove::run_multitenancy(),
         },
         Commands::Dev => dev::run(),
         Commands::Check => check::run(),

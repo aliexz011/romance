@@ -475,6 +475,9 @@ fn scan_addons(project_root: &Path) -> Vec<String> {
     if project_root.join("frontend/src/features/dev/DevDashboard.tsx").exists() {
         addons.push("dashboard".to_string());
     }
+    if project_root.join("backend/src/tenant.rs").exists() {
+        addons.push("multitenancy".to_string());
+    }
 
     addons
 }
@@ -537,6 +540,14 @@ fn generate_addons_section(addons: &[String]) -> String {
                 s.push_str("### Dev Dashboard\n");
                 s.push_str("- Developer dashboard at `/dev`\n");
                 s.push_str("- Entity counts, API endpoint reference\n\n");
+            }
+            "multitenancy" => {
+                s.push_str("### Multitenancy\n");
+                s.push_str("- Row-level tenant isolation: all entities get `tenant_id` column\n");
+                s.push_str("- `TenantGuard` extractor reads tenant_id from JWT claims\n");
+                s.push_str("- All CRUD queries automatically filter by tenant_id\n");
+                s.push_str("- Tenant admin API: `POST/GET /api/tenants` (admin-only)\n");
+                s.push_str("- Users belong to a tenant (`users.tenant_id` FK)\n\n");
             }
             _ => {}
         }

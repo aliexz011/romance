@@ -1,0 +1,39 @@
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
+#[sea_orm(table_name = "tenants")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: Uuid,
+    #[sea_orm(unique)]
+    pub name: String,
+    #[sea_orm(unique)]
+    pub slug: String,
+    pub created_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+// === ROMANCE:RELATIONS ===
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateTenant {
+    pub name: String,
+    pub slug: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TenantPublic {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub created_at: DateTimeWithTimeZone,
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

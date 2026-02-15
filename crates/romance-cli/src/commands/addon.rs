@@ -82,6 +82,11 @@ pub fn run_list() -> Result<()> {
         "dashboard".cyan(),
         "Developer dashboard"
     );
+    println!(
+        "  {:<16} {}",
+        "multitenancy".cyan(),
+        "Row-level multitenancy (tenant_id on entities)"
+    );
     println!();
     println!(
         "Install with: {}",
@@ -119,6 +124,7 @@ pub fn run_status() -> Result<()> {
         ("api-keys", Box::new(romance_core::addon::api_keys::ApiKeysAddon)),
         ("i18n", Box::new(romance_core::addon::i18n::I18nAddon)),
         ("dashboard", Box::new(romance_core::addon::dashboard::DashboardAddon)),
+        ("multitenancy", Box::new(romance_core::addon::multitenancy::MultitenancyAddon)),
     ];
 
     for (label, addon) in &addons {

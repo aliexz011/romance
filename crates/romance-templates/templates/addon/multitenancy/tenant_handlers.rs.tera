@@ -1,0 +1,91 @@
+use axum::extract::{Path, State};
+use sea_orm::*;
+use uuid::Uuid;
+
+use crate::api::{ok, ApiResponse};
+use crate::auth::AdminUser;
+use crate::entities::tenant::{self, CreateTenant, TenantPublic};
+use crate::errors::{AppError, AppResult};
+use crate::routes::AppState;
+
+/// Create a new tenant. Requires admin access.
+pub async fn create_tenant(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    axum::Json(input): axum::Json<CreateTenant>,
+) -> AppResult<ApiResponse<TenantPublic>> {
+    // Check for duplicate slug
+    let existing = tenant::Entity::find()
+        .filter(tenant::Column::Slug.eq(&input.slug))
+        .one(&state.db)
+        .await?;
+
+    if existing.is_some() {
+        return Err(AppError::Conflict("Tenant slug already exists".into()));
+    }
+
+    let now = chrono::Utc::now().fixed_offset();
+    let id = Uuid::new_v4();
+
+    let model = tenant::ActiveModel {
+        id: Set(id),
+        name: Set(input.name.clone()),
+        slug: Set(input.slug.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    let created = model.insert(&state.db).await?;
+
+    Ok(ok(TenantPublic {
+        id: created.id,
+        name: created.name,
+        slug: created.slug,
+        created_at: created.created_at,
+    }))
+}
+
+/// List all tenants. Requires admin access.
+pub async fn list_tenants(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+) -> AppResult<ApiResponse<Vec<TenantPublic>>> {
+    let tenants = tenant::Entity::find()
+        .order_by_desc(tenant::Column::CreatedAt)
+        .all(&state.db)
+        .await?;
+
+    let result: Vec<TenantPublic> = tenants
+        .into_iter()
+        .map(|t| TenantPublic {
+            id: t.id,
+            name: t.name,
+            slug: t.slug,
+            created_at: t.created_at,
+        })
+        .collect();
+
+    Ok(ok(result))
+}
+
+/// Get a single tenant by ID. Requires admin access.
+pub async fn get_tenant(
+    _admin: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> AppResult<ApiResponse<TenantPublic>> {
+    let tenant = tenant::Entity::find_by_id(id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Tenant not found".into()))?;
+
+    Ok(ok(TenantPublic {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        created_at: tenant.created_at,
+    }))
+}
+
+// === ROMANCE:CUSTOM ===
+// Code below this line is preserved on re-generate

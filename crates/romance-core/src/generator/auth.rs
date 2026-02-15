@@ -30,6 +30,7 @@ pub fn generate() -> Result<()> {
     ctx.insert("project_name", &config.project.name);
     ctx.insert("project_name_snake", &config.project.name.to_snake_case());
     ctx.insert("timestamp", &timestamp);
+    ctx.insert("has_multitenancy", &config.has_feature("multitenancy"));
 
     // Backend auth module
     let content = engine.render("auth/backend/auth.rs.tera", &ctx)?;

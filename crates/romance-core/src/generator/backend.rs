@@ -327,6 +327,7 @@ fn build_context(entity: &EntityDefinition) -> Context {
     let has_validation = config.as_ref().map(|c| c.has_feature("validation")).unwrap_or(false);
     let has_search = config.as_ref().map(|c| c.has_feature("search")).unwrap_or(false);
     let has_audit = config.as_ref().map(|c| c.has_feature("audit_log")).unwrap_or(false);
+    let has_multitenancy = config.as_ref().map(|c| c.has_feature("multitenancy")).unwrap_or(false);
 
     // Detect if auth has been generated (backend/src/auth.rs exists)
     let has_auth = project_root.join("backend/src/auth.rs").exists();
@@ -341,6 +342,7 @@ fn build_context(entity: &EntityDefinition) -> Context {
     ctx.insert("has_search", &has_search);
     ctx.insert("has_audit", &has_audit);
     ctx.insert("has_auth", &has_auth);
+    ctx.insert("has_multitenancy", &has_multitenancy);
 
     let has_searchable_fields = entity.fields.iter().any(|f| f.searchable);
     ctx.insert("has_searchable_fields", &has_searchable_fields);

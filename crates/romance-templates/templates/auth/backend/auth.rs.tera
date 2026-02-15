@@ -18,6 +18,8 @@ pub struct Claims {
     pub sub: String,
     pub email: String,
     pub role: String,
+{% if has_multitenancy %}    pub tenant_id: Option<String>,
+{% endif %}
     pub exp: usize,
     pub iat: usize,
 }
@@ -41,7 +43,11 @@ impl Claims {
     }
 }
 
+{% if has_multitenancy %}
+pub fn create_token(user_id: Uuid, email: &str, role: &str, tenant_id: Option<Uuid>) -> Result<String> {
+{% else %}
 pub fn create_token(user_id: Uuid, email: &str, role: &str) -> Result<String> {
+{% endif %}
     let secret = std::env::var("JWT_SECRET").context("JWT_SECRET must be set")?;
 
     let now = chrono::Utc::now();
@@ -52,6 +58,8 @@ pub fn create_token(user_id: Uuid, email: &str, role: &str) -> Result<String> {
         sub: user_id.to_string(),
         email: email.to_string(),
         role: role.to_string(),
+{% if has_multitenancy %}        tenant_id: tenant_id.map(|t| t.to_string()),
+{% endif %}
         exp,
         iat,
     };

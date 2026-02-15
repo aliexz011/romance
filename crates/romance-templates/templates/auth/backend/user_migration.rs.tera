@@ -20,6 +20,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("user"),
                     )
+{% if has_multitenancy %}                    .col(ColumnDef::new(Users::TenantId).uuid().not_null())
+{% endif %}
                     .col(
                         ColumnDef::new(Users::CreatedAt)
                             .timestamp_with_time_zone()
@@ -45,6 +47,28 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+{% if has_multitenancy %}        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("fk_users_tenant_id")
+                    .from(Users::Table, Users::TenantId)
+                    .to(Tenants::Table, Tenants::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_users_tenant_id")
+                    .table(Users::Table)
+                    .col(Users::TenantId)
+                    .to_owned(),
+            )
+            .await?;
+
+{% endif %}
         Ok(())
     }
 
@@ -62,6 +86,16 @@ enum Users {
     Email,
     PasswordHash,
     Role,
+{% if has_multitenancy %}    TenantId,
+{% endif %}
     CreatedAt,
     UpdatedAt,
 }
+
+{% if has_multitenancy %}
+#[derive(DeriveIden)]
+enum Tenants {
+    Table,
+    Id,
+}
+{% endif %}

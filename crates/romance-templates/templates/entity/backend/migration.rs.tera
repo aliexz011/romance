@@ -16,7 +16,8 @@ impl MigrationTrait for Migration {
 {% if field.optional %}                    .col(ColumnDef::new({{ entity_name }}::{{ field.name | pascal_case }}).{{ field.migration_method }}.null())
 {% else %}                    .col(ColumnDef::new({{ entity_name }}::{{ field.name | pascal_case }}).{{ field.migration_method }}.not_null())
 {% endif -%}
-{% endfor %}                    .col(ColumnDef::new({{ entity_name }}::CreatedAt).timestamp_with_time_zone().not_null())
+{% endfor %}{% if has_multitenancy %}                    .col(ColumnDef::new({{ entity_name }}::TenantId).uuid().not_null())
+{% endif %}                    .col(ColumnDef::new({{ entity_name }}::CreatedAt).timestamp_with_time_zone().not_null())
                     .col(ColumnDef::new({{ entity_name }}::UpdatedAt).timestamp_with_time_zone().not_null())
 {% if soft_delete %}                    .col(ColumnDef::new({{ entity_name }}::DeletedAt).timestamp_with_time_zone().null())
 {% endif %}
@@ -28,9 +29,26 @@ impl MigrationTrait for Migration {
                             .on_delete(ForeignKeyAction::Cascade)
                     )
 {% endif -%}
-{% endfor %}                    .to_owned(),
+{% endfor %}{% if has_multitenancy %}                    .foreign_key(
+                        ForeignKey::create()
+                            .from({{ entity_name }}::Table, {{ entity_name }}::TenantId)
+                            .to(Alias::new("tenants"), Alias::new("id"))
+                            .on_delete(ForeignKeyAction::Cascade)
+                    )
+{% endif %}                    .to_owned(),
             )
-            .await
+            .await{% if has_multitenancy %}?;
+
+        // Index on tenant_id for query performance
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_{{ entity_name_snake | plural }}_tenant_id")
+                    .table({{ entity_name }}::Table)
+                    .col({{ entity_name }}::TenantId)
+                    .to_owned(),
+            )
+            .await{% endif %}
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -46,7 +64,8 @@ enum {{ entity_name }} {
     Table,
     Id,
 {% for field in fields %}    {{ field.name | pascal_case }},
-{% endfor %}    CreatedAt,
+{% endfor %}{% if has_multitenancy %}    TenantId,
+{% endif %}    CreatedAt,
     UpdatedAt,
 {% if soft_delete %}    DeletedAt,
 {% endif %}
