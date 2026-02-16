@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 {% if has_fk_fields %}import { useQuery } from '@tanstack/react-query';
 {% endif %}import { useCreate{{ entity_name }}, useUpdate{{ entity_name }}, use{{ entity_name }} } from './hooks';
 import type { Create{{ entity_name }} } from './types';
@@ -18,7 +18,14 @@ import type { Create{{ entity_name }} } from './types';
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-{% endif %}
+{% endif %}import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 
 const schema = z.object({
 {% for field in fields %}
@@ -86,7 +93,23 @@ export default function {{ entity_name }}Form() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-2xl space-y-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link to="/">Dashboard</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link to="/{{ entity_name_snake | plural }}">{{ entity_name | plural }}</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{isEdit ? 'Edit' : 'Create'}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
       <Card>
         <CardHeader>
           <CardTitle>{isEdit ? 'Edit' : 'Create'} {{ entity_name }}</CardTitle>

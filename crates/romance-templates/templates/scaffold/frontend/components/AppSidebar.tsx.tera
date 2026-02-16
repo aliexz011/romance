@@ -1,0 +1,37 @@
+import { NavLink, Link } from 'react-router-dom'
+import { LayoutDashboard, LayoutList } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { ThemeToggle } from './ThemeToggle'
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
+    isActive
+      ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+      : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
+  )
+
+export { LayoutList, navLinkClass }
+
+export function SidebarContent() {
+  return (
+    <>
+      <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-4">
+        <Link to="/" className="flex items-center gap-2 font-semibold text-sidebar-foreground">
+          {{ project_name }}
+        </Link>
+      </div>
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        <NavLink to="/" end className={navLinkClass}>
+          <LayoutDashboard className="h-4 w-4" />
+          Dashboard
+        </NavLink>
+        {/* === ROMANCE:NAV_LINKS === */}
+      </nav>
+      <div className="border-t border-sidebar-border p-3 flex items-center justify-between">
+        <span className="text-xs text-sidebar-foreground/50">{{ project_name }}</span>
+        <ThemeToggle />
+      </div>
+    </>
+  )
+}

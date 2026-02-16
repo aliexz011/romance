@@ -8,13 +8,14 @@ use heck::{ToLowerCamelCase, ToPascalCase, ToSnakeCase};
 use std::path::Path;
 use tera::Context;
 
-/// Pre-validate that frontend markers exist in App.tsx.
+/// Pre-validate that frontend markers exist in App.tsx and AppSidebar.tsx.
 pub fn validate(_entity: &EntityDefinition) -> Result<()> {
     let app_path = Path::new("frontend/src/App.tsx");
+    let sidebar_path = Path::new("frontend/src/components/AppSidebar.tsx");
     let checks = vec![
         plan::check(app_path, markers::IMPORTS),
         plan::check(app_path, markers::APP_ROUTES),
-        plan::check(app_path, markers::NAV_LINKS),
+        plan::check(sidebar_path, markers::NAV_LINKS),
     ];
     plan::validate_markers(&checks)
 }
@@ -87,14 +88,15 @@ pub fn generate(entity: &EntityDefinition, tracker: &mut GenerationTracker) -> R
         ),
     )?;
 
-    // Nav link
+    // Nav link in sidebar
+    let sidebar_path = base.join("components/AppSidebar.tsx");
     utils::insert_at_marker(
-        &app_path,
+        &sidebar_path,
         markers::NAV_LINKS,
         &format!(
-            "                <Link to=\"/{plural}\" className=\"text-muted-foreground hover:text-foreground transition-colors\">{entity_pascal}</Link>",
+            "        <NavLink to=\"/{plural}\" className={{navLinkClass}}>\n          <LayoutList className=\"h-4 w-4\" />\n          {entity_plural}\n        </NavLink>",
             plural = plural,
-            entity_pascal = entity_pascal,
+            entity_plural = utils::pluralize(entity_pascal),
         ),
     )?;
 

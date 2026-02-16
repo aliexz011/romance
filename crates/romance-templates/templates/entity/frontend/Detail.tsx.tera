@@ -4,6 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 {% if has_status_field %}import { Badge } from '@/components/ui/badge';
 {% endif %}import { Separator } from '@/components/ui/separator';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 
 export default function {{ entity_name }}Detail() {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +23,22 @@ export default function {{ entity_name }}Detail() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link to="/">Dashboard</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link to="/{{ entity_name_snake | plural }}">{{ entity_name | plural }}</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Details</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">{{ entity_name }} Details</h2>
         <div className="flex gap-2">

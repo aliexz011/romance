@@ -104,14 +104,42 @@ function App() {
       <Routes>
         {/* === ROMANCE:APP_ROUTES === */}
       </Routes>
-      <nav>
-        {/* === ROMANCE:NAV_LINKS === */}
-      </nav>
     </BrowserRouter>
   );
 }
 
 export default App;
+"#,
+    )
+    .unwrap();
+
+    // Frontend AppSidebar.tsx with nav links marker
+    fs::create_dir_all(project_dir.join("frontend/src/components")).unwrap();
+    fs::write(
+        project_dir.join("frontend/src/components/AppSidebar.tsx"),
+        r#"import { NavLink, Link } from 'react-router-dom'
+import { LayoutDashboard, LayoutList } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
+    isActive ? 'bg-sidebar-accent' : 'text-sidebar-foreground/70'
+  )
+
+export { LayoutList, navLinkClass }
+
+export function SidebarContent() {
+  return (
+    <nav>
+      <NavLink to="/" end className={navLinkClass}>
+        <LayoutDashboard className="h-4 w-4" />
+        Dashboard
+      </NavLink>
+      {/* === ROMANCE:NAV_LINKS === */}
+    </nav>
+  )
+}
 "#,
     )
     .unwrap();
@@ -881,14 +909,21 @@ fn test_frontend_validate_fails_on_missing_nav_links() {
     let dir = tempfile::tempdir().unwrap();
     let project_dir = dir.path().join("fe-validate-test");
 
-    fs::create_dir_all(project_dir.join("frontend/src")).unwrap();
+    fs::create_dir_all(project_dir.join("frontend/src/components")).unwrap();
 
-    // App.tsx with IMPORTS and APP_ROUTES but missing NAV_LINKS
+    // App.tsx with IMPORTS and APP_ROUTES markers
     fs::write(
         project_dir.join("frontend/src/App.tsx"),
         r#"// === ROMANCE:IMPORTS ===
 {/* === ROMANCE:APP_ROUTES === */}
 "#,
+    )
+    .unwrap();
+
+    // AppSidebar.tsx WITHOUT NAV_LINKS marker
+    fs::write(
+        project_dir.join("frontend/src/components/AppSidebar.tsx"),
+        "export function SidebarContent() { return null }\n",
     )
     .unwrap();
 
@@ -1428,11 +1463,13 @@ fn test_frontend_injects_nav_links() {
         romance_core::generator::frontend::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
     });
 
-    let app_tsx = fs::read_to_string(project_dir.join("frontend/src/App.tsx")).unwrap();
+    let sidebar = fs::read_to_string(project_dir.join("frontend/src/components/AppSidebar.tsx")).unwrap();
 
-    // Should have nav link
-    assert!(app_tsx.contains("Invoice"), "App.tsx should have nav link for Invoice");
-    assert!(app_tsx.contains("/invoices"), "App.tsx should link to /invoices");
+    // Should have nav link in sidebar
+    assert!(sidebar.contains("Invoices"), "AppSidebar.tsx should have nav link for Invoices");
+    assert!(sidebar.contains("/invoices"), "AppSidebar.tsx should link to /invoices");
+    assert!(sidebar.contains("NavLink"), "AppSidebar.tsx should use NavLink component");
+    assert!(sidebar.contains("LayoutList"), "AppSidebar.tsx should use LayoutList icon");
 }
 
 #[test]

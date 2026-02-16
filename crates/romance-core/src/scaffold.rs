@@ -152,6 +152,10 @@ fn render_frontend_files(
             "scaffold/frontend/lib/utils.ts.tera",
             "frontend/src/lib/utils.ts",
         ),
+        (
+            "scaffold/frontend/components/AppSidebar.tsx.tera",
+            "frontend/src/components/AppSidebar.tsx",
+        ),
     ];
 
     let mut rendered = Vec::new();
@@ -232,6 +236,30 @@ fn render_frontend_files(
         content: index_html,
     });
     println!("  {} frontend/index.html", "create".green());
+
+    // Static component files (not templated)
+    let static_components = vec![
+        (
+            "scaffold/frontend/components/ThemeProvider.tsx",
+            "frontend/src/components/ThemeProvider.tsx",
+        ),
+        (
+            "scaffold/frontend/components/ThemeToggle.tsx",
+            "frontend/src/components/ThemeToggle.tsx",
+        ),
+    ];
+
+    for (embedded_path, output) in &static_components {
+        let content = engine.get_raw(embedded_path)?;
+        utils::write_file(&project_dir.join(output), &content)?;
+        rendered.push(RenderedFile {
+            output: output.to_string(),
+            template: None,
+            category: FileCategory::Scaffold,
+            content,
+        });
+        println!("  {} {}", "create".green(), output);
+    }
 
     Ok(rendered)
 }

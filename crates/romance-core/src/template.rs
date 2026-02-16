@@ -12,9 +12,12 @@ impl TemplateEngine {
     pub fn new() -> Result<Self> {
         let mut tera = Tera::default();
 
-        // Load all embedded templates
+        // Load only .tera templates into Tera (static files are accessed via get_raw())
         for file in Templates::iter() {
             let path = file.as_ref();
+            if !path.ends_with(".tera") {
+                continue;
+            }
             if let Some(content) = Templates::get(path) {
                 let content_str = std::str::from_utf8(content.data.as_ref())?;
                 tera.add_raw_template(path, content_str)?;
@@ -38,6 +41,15 @@ impl TemplateEngine {
             .render(template_name, context)
             .with_context(|| format!("Failed to render template '{}'", template_name))?;
         Ok(result)
+    }
+
+    /// Read an embedded file as raw string without Tera rendering.
+    pub fn get_raw(&self, path: &str) -> Result<String> {
+        let content = Templates::get(path)
+            .with_context(|| format!("Embedded file '{}' not found", path))?;
+        let s = std::str::from_utf8(content.data.as_ref())
+            .with_context(|| format!("Invalid UTF-8 in '{}'", path))?;
+        Ok(s.to_string())
     }
 }
 
