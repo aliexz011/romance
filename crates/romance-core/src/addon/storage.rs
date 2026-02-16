@@ -150,6 +150,7 @@ fn install_storage(project_root: &Path) -> Result<()> {
         &[
             ("axum", r#"{ version = "0.8", features = ["json", "multipart"] }"#),
             ("mime", r#""0.3""#),
+            ("async-trait", r#""0.1""#),
         ],
     )?;
 

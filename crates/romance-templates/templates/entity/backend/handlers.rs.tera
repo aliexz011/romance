@@ -23,7 +23,7 @@ pub struct ListParams {
 
 {% if has_belongs_to %}
 /// Query parameter for requesting nested related entities on single-item GET.
-/// Usage: `GET /api/{{ entity_name_snake | plural }}/123?include={% for rel in belongs_to_relations %}{{ rel.target_snake }}{% if not loop.last %},{% endif %}{% endfor %}`
+/// Usage: `GET /api/{{ entity_name_snake | plural }}/123?include={% for rel in belongs_to_relations %}{{ rel.detail_field }}{% if not loop.last %},{% endif %}{% endfor %}`
 #[derive(Debug, serde::Deserialize, Default)]
 pub struct IncludeQuery {
     pub include: Option<String>,
@@ -162,20 +162,20 @@ pub async fn get(
         let mut detail = {{ entity_name }}DetailResponse::from(item);
 
 {% for rel in belongs_to_relations %}
-        if includes.contains(&"{{ rel.target_snake }}") {
+        if includes.contains(&"{{ rel.detail_field }}") {
 {% if rel.optional %}            if let Some(fk_val) = detail.{{ rel.fk_rust_name }} {
                 let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(fk_val)
                     .one(&state.db)
                     .await?;
                 if let Some(r) = related {
-                    detail.{{ rel.target_snake }} = Some(serde_json::to_value(r)?);
+                    detail.{{ rel.detail_field }} = Some(serde_json::to_value(r)?);
                 }
             }
 {% else %}            let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(detail.{{ rel.fk_rust_name }})
                 .one(&state.db)
                 .await?;
             if let Some(r) = related {
-                detail.{{ rel.target_snake }} = Some(serde_json::to_value(r)?);
+                detail.{{ rel.detail_field }} = Some(serde_json::to_value(r)?);
             }
 {% endif %}
         }

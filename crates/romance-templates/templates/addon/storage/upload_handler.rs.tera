@@ -2,6 +2,7 @@ use axum::extract::{Multipart, State};
 use crate::errors::AppResult;
 use crate::api::{ok, ApiResponse};
 use crate::routes::AppState;
+use crate::storage::StorageBackend;
 
 /// Upload a file. Returns the URL/path of the uploaded file.
 ///
@@ -14,20 +15,20 @@ pub async fn upload(
     mut multipart: Multipart,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
     while let Some(field) = multipart.next_field().await.map_err(|e| {
-        crate::errors::AppError::BadRequest(format!("Invalid multipart data: {}", e))
+        crate::errors::AppError::Validation(format!("Invalid multipart data: {}", e))
     })? {
         let filename = field
             .file_name()
-            .map(|s| s.to_string())
+            .map(|s: &str| s.to_string())
             .unwrap_or_else(|| "upload.bin".to_string());
 
         let content_type = field
             .content_type()
-            .map(|s| s.to_string())
+            .map(|s: &str| s.to_string())
             .unwrap_or_else(|| "application/octet-stream".to_string());
 
         let data = field.bytes().await.map_err(|e| {
-            crate::errors::AppError::BadRequest(format!("Failed to read file: {}", e))
+            crate::errors::AppError::Validation(format!("Failed to read file: {}", e))
         })?;
 
         let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".to_string());
@@ -38,7 +39,7 @@ pub async fn upload(
             &std::env::var("MAX_FILE_SIZE").unwrap_or_else(|_| "10MB".to_string())
         ).unwrap_or(10 * 1024 * 1024);
         if data.len() > max_size {
-            return Err(crate::errors::AppError::BadRequest(
+            return Err(crate::errors::AppError::Validation(
                 format!("File too large. Maximum size: {} bytes", max_size),
             ));
         }
@@ -46,12 +47,12 @@ pub async fn upload(
         let url = storage
             .store(&filename, &data, &content_type)
             .await
-            .map_err(|e| crate::errors::AppError::Internal(format!("Storage error: {}", e)))?;
+            .map_err(|e| crate::errors::AppError::Internal(anyhow::anyhow!("Storage error: {}", e)))?;
 
         return Ok(ok(serde_json::json!({ "url": url })));
     }
 
-    Err(crate::errors::AppError::BadRequest(
+    Err(crate::errors::AppError::Validation(
         "No file provided".to_string(),
     ))
 }
@@ -64,27 +65,27 @@ pub async fn upload_image(
     mut multipart: Multipart,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
     while let Some(field) = multipart.next_field().await.map_err(|e| {
-        crate::errors::AppError::BadRequest(format!("Invalid multipart data: {}", e))
+        crate::errors::AppError::Validation(format!("Invalid multipart data: {}", e))
     })? {
         let filename = field
             .file_name()
-            .map(|s| s.to_string())
+            .map(|s: &str| s.to_string())
             .unwrap_or_else(|| "image.bin".to_string());
 
         let content_type = field
             .content_type()
-            .map(|s| s.to_string())
+            .map(|s: &str| s.to_string())
             .unwrap_or_else(|| "application/octet-stream".to_string());
 
         if !crate::storage::is_valid_image_type(&content_type) {
-            return Err(crate::errors::AppError::BadRequest(format!(
+            return Err(crate::errors::AppError::Validation(format!(
                 "Invalid image type: {}. Allowed: jpeg, png, gif, webp, svg",
                 content_type
             )));
         }
 
         let data = field.bytes().await.map_err(|e| {
-            crate::errors::AppError::BadRequest(format!("Failed to read file: {}", e))
+            crate::errors::AppError::Validation(format!("Failed to read file: {}", e))
         })?;
 
         let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".to_string());
@@ -95,7 +96,7 @@ pub async fn upload_image(
             &std::env::var("MAX_FILE_SIZE").unwrap_or_else(|_| "10MB".to_string())
         ).unwrap_or(10 * 1024 * 1024);
         if data.len() > max_size {
-            return Err(crate::errors::AppError::BadRequest(
+            return Err(crate::errors::AppError::Validation(
                 format!("File too large. Maximum size: {} bytes", max_size),
             ));
         }
@@ -103,12 +104,12 @@ pub async fn upload_image(
         let url = storage
             .store(&filename, &data, &content_type)
             .await
-            .map_err(|e| crate::errors::AppError::Internal(format!("Storage error: {}", e)))?;
+            .map_err(|e| crate::errors::AppError::Internal(anyhow::anyhow!("Storage error: {}", e)))?;
 
         return Ok(ok(serde_json::json!({ "url": url })));
     }
 
-    Err(crate::errors::AppError::BadRequest(
+    Err(crate::errors::AppError::Validation(
         "No file provided".to_string(),
     ))
 }

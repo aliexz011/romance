@@ -17,7 +17,7 @@ name = "romance"
 path = "src/main.rs"
 
 [dependencies]
-romance-core = { version = "0.2.3", path = "../romance-core" }
+romance-core = { version = "0.2.4", path = "../romance-core" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 colored = "2"

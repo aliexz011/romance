@@ -188,6 +188,7 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 "searchable": f.searchable,
                 "is_file": matches!(f.field_type, crate::entity::FieldType::File),
                 "is_image": matches!(f.field_type, crate::entity::FieldType::Image),
+                "is_json": matches!(f.field_type, crate::entity::FieldType::Json),
                 "filter_method": context::filter_method(&f.field_type),
             })
         })
@@ -209,6 +210,30 @@ fn build_context(entity: &EntityDefinition) -> Context {
         .iter()
         .any(|f| f.field_type.to_shadcn() == "Textarea");
     ctx.insert("has_textarea_field", &has_textarea_field);
+
+    // Check if entity has fields that render as <Input> (not FK select, not Textarea, not Switch)
+    let has_input_field = entity.fields.iter().any(|f| {
+        f.relation.is_none()
+            && f.field_type.to_shadcn() != "Textarea"
+            && f.field_type.to_shadcn() != "Switch"
+    });
+    ctx.insert("has_input_field", &has_input_field);
+
+    // Build deduplicated FK import list (multiple FKs to same entity should produce one import)
+    let mut seen_relations = std::collections::HashSet::new();
+    let fk_imports: Vec<serde_json::Value> = entity
+        .fields
+        .iter()
+        .filter(|f| f.relation.is_some())
+        .filter(|f| seen_relations.insert(f.relation.as_ref().unwrap().clone()))
+        .map(|f| {
+            let rel = f.relation.as_ref().unwrap();
+            serde_json::json!({
+                "relation_camel": rel.to_lower_camel_case(),
+            })
+        })
+        .collect();
+    ctx.insert("fk_imports", &fk_imports);
 
     // Build relation arrays for templates
     let m2m_relations: Vec<serde_json::Value> = entity

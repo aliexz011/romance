@@ -1,4 +1,5 @@
 use sea_orm::*;
+use sea_orm::sea_query::{Expr, SimpleExpr};
 
 /// Helper for PostgreSQL full-text search using tsvector.
 ///
@@ -59,7 +60,7 @@ pub fn search_condition(search_columns: &[&str], search_term: &str) -> SimpleExp
 
     Expr::cust_with_values(
         format!("to_tsvector('english', {}) @@ to_tsquery('english', $1)", tsvector_expr),
-        [tsquery.into() as sea_orm::Value],
+        [sea_orm::Value::from(tsquery.clone())],
     )
 }
 
@@ -80,6 +81,6 @@ pub fn search_rank_expr(search_columns: &[&str], search_term: &str) -> SimpleExp
 
     Expr::cust_with_values(
         format!("ts_rank(to_tsvector('english', {}), to_tsquery('english', $1))", tsvector_expr),
-        [tsquery.into() as sea_orm::Value],
+        [sea_orm::Value::from(tsquery.clone())],
     )
 }

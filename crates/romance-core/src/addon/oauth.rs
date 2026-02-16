@@ -186,27 +186,68 @@ fn install_oauth(project_root: &Path, provider: &str) -> Result<()> {
         &format!("            Box::new({}::Migration),", migration_module),
     )?;
 
-    // Inject oauth fields into user entity model
+    // Inject oauth fields into user entity model (both Model and UserPublic)
     let user_model_path = project_root.join("backend/src/entities/user.rs");
     if user_model_path.exists() {
-        let user_content = std::fs::read_to_string(&user_model_path)?;
+        let mut user_content = std::fs::read_to_string(&user_model_path)?;
         if !user_content.contains("oauth_provider") {
-            // Insert oauth fields before the created_at field
-            let new_content = if user_content.contains("pub created_at:") {
-                user_content.replace(
-                    "    pub created_at:",
-                    "    pub oauth_provider: Option<String>,\n    pub oauth_id: Option<String>,\n    pub created_at:",
-                )
-            } else {
-                // Fallback: insert before ROMANCE:RELATIONS marker
-                user_content.replace(
-                    "// === ROMANCE:RELATIONS ===",
-                    "    pub oauth_provider: Option<String>,\n    pub oauth_id: Option<String>,\n}\n\n// === ROMANCE:RELATIONS ===",
-                )
-            };
-            std::fs::write(&user_model_path, new_content)?;
+            // Add oauth fields to Model struct: insert before "pub created_at" in "pub struct Model"
+            if let Some(model_pos) = user_content.find("pub struct Model") {
+                if let Some(rel_pos) = user_content[model_pos..].find("    pub created_at:") {
+                    let insert_pos = model_pos + rel_pos;
+                    user_content.insert_str(insert_pos, "    pub oauth_provider: Option<String>,\n    pub oauth_id: Option<String>,\n");
+                }
+            }
+            // Add oauth fields to UserPublic struct: insert before "pub created_at" in "pub struct UserPublic"
+            if let Some(up_pos) = user_content.find("pub struct UserPublic") {
+                if let Some(rel_pos) = user_content[up_pos..].find("    pub created_at:") {
+                    let insert_pos = up_pos + rel_pos;
+                    user_content.insert_str(insert_pos, "    pub oauth_provider: Option<String>,\n    pub oauth_id: Option<String>,\n");
+                }
+            }
+            std::fs::write(&user_model_path, user_content)?;
             println!("  {} backend/src/entities/user.rs (added oauth fields)", "update".green());
         }
+    }
+
+    // Patch auth handlers to include oauth fields in UserPublic and ActiveModel
+    let auth_handlers_path = project_root.join("backend/src/handlers/auth.rs");
+    if auth_handlers_path.exists() {
+        let mut auth_content = std::fs::read_to_string(&auth_handlers_path)?;
+        // Add ..Default::default() to ActiveModel in register handler so new optional fields are handled
+        if !auth_content.contains("..Default::default()") {
+            // Find the ActiveModel block and add ..Default::default() before its closing brace
+            // Pattern: "created_at: Set(now),\n    };" in the register function's ActiveModel
+            if let Some(pos) = auth_content.find("created_at: Set(now),\n        updated_at: Set(now),\n    };") {
+                let insert_pos = pos + "created_at: Set(now),\n        updated_at: Set(now),\n".len();
+                auth_content.insert_str(insert_pos, "        ..Default::default()\n");
+            } else if let Some(pos) = auth_content.find("updated_at: Set(now),\n    };") {
+                let insert_pos = pos + "updated_at: Set(now),\n".len();
+                auth_content.insert_str(insert_pos, "        ..Default::default()\n");
+            }
+        }
+        // Add oauth fields to all UserPublic constructions
+        if !auth_content.contains("oauth_provider:") {
+            // Replace "created_at: *.created_at," patterns in UserPublic structs
+            // to include oauth fields before created_at
+            auth_content = auth_content.replace(
+                "        created_at: created.created_at,",
+                "        oauth_provider: created.oauth_provider,\n        oauth_id: created.oauth_id,\n        created_at: created.created_at,",
+            );
+            auth_content = auth_content.replace(
+                "        created_at: user.created_at,",
+                "        oauth_provider: user.oauth_provider.clone(),\n        oauth_id: user.oauth_id.clone(),\n        created_at: user.created_at,",
+            );
+            auth_content = auth_content.replace(
+                "        created_at: updated.created_at,",
+                "        oauth_provider: updated.oauth_provider,\n        oauth_id: updated.oauth_id,\n        created_at: updated.created_at,",
+            );
+            auth_content = auth_content.replace(
+                "            created_at: u.created_at,",
+                "            oauth_provider: u.oauth_provider,\n            oauth_id: u.oauth_id,\n            created_at: u.created_at,",
+            );
+        }
+        std::fs::write(&auth_handlers_path, auth_content)?;
     }
 
     // Add mod oauth to main.rs
@@ -216,7 +257,7 @@ fn install_oauth(project_root: &Path, provider: &str) -> Result<()> {
     crate::generator::auth::insert_cargo_dependency(
         &project_root.join("backend/Cargo.toml"),
         &[
-            ("oauth2", r#""4""#),
+            ("oauth2", r#"{ version = "4", features = ["reqwest"] }"#),
             ("reqwest", r#"{ version = "0.12", features = ["json"] }"#),
         ],
     )?;

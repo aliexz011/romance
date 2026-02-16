@@ -20,9 +20,9 @@ pub async fn oauth_redirect(
     State(state): State<AppState>,
 ) -> Result<Redirect, AppError> {
     let client_id = std::env::var("{{ provider | upper }}_CLIENT_ID")
-        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_ID not set".into()))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{{ provider | upper }}_CLIENT_ID not set: {}", e)))?;
     let client_secret = std::env::var("{{ provider | upper }}_CLIENT_SECRET")
-        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_SECRET not set".into()))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{{ provider | upper }}_CLIENT_SECRET not set: {}", e)))?;
 
     let redirect_url = format!(
         "{}/api/auth/oauth/{{ provider }}/callback",
@@ -54,9 +54,9 @@ pub async fn oauth_callback(
     Query(params): Query<OAuthCallback>,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
     let client_id = std::env::var("{{ provider | upper }}_CLIENT_ID")
-        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_ID not set".into()))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{{ provider | upper }}_CLIENT_ID not set: {}", e)))?;
     let client_secret = std::env::var("{{ provider | upper }}_CLIENT_SECRET")
-        .map_err(|_| AppError::Internal("{{ provider | upper }}_CLIENT_SECRET not set".into()))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("{{ provider | upper }}_CLIENT_SECRET not set: {}", e)))?;
 
     let redirect_url = format!(
         "{}/api/auth/oauth/{{ provider }}/callback",
@@ -66,24 +66,24 @@ pub async fn oauth_callback(
     let client = crate::oauth::create_oauth_client(&client_id, &client_secret, &redirect_url);
 
     // Exchange code for token
-    let http_client = reqwest::Client::new();
+    let http_client = oauth2::reqwest::async_http_client;
     let token = client
         .exchange_code(AuthorizationCode::new(params.code))
-        .request_async(&http_client)
+        .request_async(http_client)
         .await
-        .map_err(|e| AppError::Internal(format!("OAuth token exchange failed: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("OAuth token exchange failed: {}", e)))?;
 
     let access_token = token.access_token().secret();
 
     // Fetch user info from provider
     let user_info = crate::oauth::fetch_user_info(access_token)
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to fetch user info: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to fetch user info: {}", e)))?;
 
     // Find or create user
     let email = user_info
         .email
-        .ok_or_else(|| AppError::BadRequest("Email not available from OAuth provider".into()))?;
+        .ok_or_else(|| AppError::Validation("Email not available from OAuth provider".into()))?;
 
     let existing_user = crate::entities::user::Entity::find()
         .filter(crate::entities::user::Column::Email.eq(&email))

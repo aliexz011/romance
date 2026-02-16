@@ -153,6 +153,44 @@ pub fn generate() -> Result<()> {
         );
     }
 
+    // Create a minimal user API module for FK dropdown support
+    // (entities with FK references to User need userApi.list())
+    let user_api_path = project_dir.join("frontend/src/features/user/api.ts");
+    if !user_api_path.exists() {
+        let user_api_content = r#"import { apiFetch, apiFetchPaginated } from '@/lib/utils';
+
+export interface User {
+  id: string;
+  email: string;
+  role: string;
+}
+
+export interface UserListParams {
+  page?: number;
+  perPage?: number;
+  [key: string]: string | number | undefined;
+}
+
+export const userApi = {
+  list: (params: UserListParams = {}) => {
+    const { page = 1, perPage = 100 } = params;
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(page));
+    searchParams.set('per_page', String(perPage));
+    return apiFetchPaginated<User[]>(`/auth/users?${searchParams.toString()}`);
+  },
+
+  get: (id: string) =>
+    apiFetch<User>(`/auth/users/${id}`),
+};
+"#;
+        utils::write_file(&user_api_path, user_api_content)?;
+        println!(
+            "  {} frontend/src/features/user/api.ts",
+            "create".green()
+        );
+    }
+
     println!();
     println!("{}", "Authentication generated successfully!".green().bold());
     println!();
@@ -169,6 +207,10 @@ pub fn insert_cargo_dependency(path: &Path, deps: &[(&str, &str)]) -> Result<()>
 
     for (name, version) in deps {
         if new_content.contains(&format!("{} =", name)) {
+            // Dependency exists — merge features if the new spec has features
+            if let Some(new_features) = extract_features(version) {
+                new_content = merge_features_into_dep(&new_content, name, &new_features);
+            }
             continue;
         }
         // Insert before the last line of [dependencies]
@@ -181,6 +223,80 @@ pub fn insert_cargo_dependency(path: &Path, deps: &[(&str, &str)]) -> Result<()>
 
     std::fs::write(path, new_content)?;
     Ok(())
+}
+
+/// Extract feature names from a dependency spec like `{ version = "0.8", features = ["json", "multipart"] }`
+fn extract_features(spec: &str) -> Option<Vec<String>> {
+    let start = spec.find("features = [")?;
+    let bracket_start = start + "features = [".len();
+    let bracket_end = spec[bracket_start..].find(']')? + bracket_start;
+    let features_str = &spec[bracket_start..bracket_end];
+    let features: Vec<String> = features_str
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if features.is_empty() {
+        None
+    } else {
+        Some(features)
+    }
+}
+
+/// Merge new features into an existing dependency line in Cargo.toml content
+fn merge_features_into_dep(content: &str, dep_name: &str, new_features: &[String]) -> String {
+    let dep_prefix = format!("{} =", dep_name);
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    for line in &mut lines {
+        if !line.trim_start().starts_with(&dep_prefix) {
+            continue;
+        }
+        // Parse existing features from this line
+        if let Some(existing) = extract_features(line) {
+            let mut all_features: Vec<String> = existing;
+            for f in new_features {
+                if !all_features.contains(f) {
+                    all_features.push(f.clone());
+                }
+            }
+            // Rebuild the features array in the line
+            let old_start = line.find("features = [").unwrap();
+            let bracket_end = line[old_start..].find(']').unwrap() + old_start + 1;
+            let new_features_str = format!(
+                "features = [{}]",
+                all_features
+                    .iter()
+                    .map(|f| format!("\"{}\"", f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            line.replace_range(old_start..bracket_end, &new_features_str);
+        } else if line.contains("features") {
+            // features key exists but couldn't parse — skip
+        } else if line.contains('{') && line.contains('}') {
+            // Inline table without features — add features before closing brace
+            let close = line.rfind('}').unwrap();
+            let features_str = format!(
+                ", features = [{}] ",
+                new_features
+                    .iter()
+                    .map(|f| format!("\"{}\"", f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            line.insert_str(close, &features_str);
+        }
+        break;
+    }
+
+    // Preserve trailing newline
+    let result = lines.join("\n");
+    if content.ends_with('\n') && !result.ends_with('\n') {
+        format!("{}\n", result)
+    } else {
+        result
+    }
 }
 
 pub fn append_env_var(path: &Path, line: &str) -> Result<()> {
@@ -203,4 +319,92 @@ pub fn generate_jwt_secret() -> String {
         uuid::Uuid::new_v4().as_u128(),
         uuid::Uuid::new_v4().as_u128()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_features_basic() {
+        let spec = r#"{ version = "0.8", features = ["json", "multipart"] }"#;
+        let features = extract_features(spec).unwrap();
+        assert_eq!(features, vec!["json", "multipart"]);
+    }
+
+    #[test]
+    fn extract_features_single() {
+        let spec = r#"{ version = "0.6", features = ["cors"] }"#;
+        let features = extract_features(spec).unwrap();
+        assert_eq!(features, vec!["cors"]);
+    }
+
+    #[test]
+    fn extract_features_none() {
+        let spec = r#""0.8""#;
+        assert!(extract_features(spec).is_none());
+    }
+
+    #[test]
+    fn merge_features_adds_new() {
+        let content = r#"[dependencies]
+axum = { version = "0.8", features = ["json"] }
+"#;
+        let result = merge_features_into_dep(content, "axum", &["multipart".to_string()]);
+        assert!(result.contains(r#""json""#));
+        assert!(result.contains(r#""multipart""#));
+    }
+
+    #[test]
+    fn merge_features_no_duplicates() {
+        let content = r#"[dependencies]
+axum = { version = "0.8", features = ["json", "multipart"] }
+"#;
+        let result = merge_features_into_dep(content, "axum", &["json".to_string()]);
+        // Should not have duplicate "json"
+        let count = result.matches(r#""json""#).count();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn merge_features_multiple_deps() {
+        let content = r#"[dependencies]
+serde = { version = "1", features = ["derive"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+"#;
+        let result = merge_features_into_dep(
+            content,
+            "tower-http",
+            &["request-id".to_string(), "propagate-header".to_string()],
+        );
+        assert!(result.contains(r#""cors""#));
+        assert!(result.contains(r#""trace""#));
+        assert!(result.contains(r#""request-id""#));
+        assert!(result.contains(r#""propagate-header""#));
+        // serde should be unchanged
+        assert!(result.contains(r#"serde = { version = "1", features = ["derive"] }"#));
+    }
+
+    #[test]
+    fn insert_cargo_dependency_merges_features() {
+        let dir = tempfile::tempdir().unwrap();
+        let cargo_path = dir.path().join("Cargo.toml");
+        std::fs::write(
+            &cargo_path,
+            r#"[dependencies]
+axum = { version = "0.8", features = ["json"] }
+"#,
+        )
+        .unwrap();
+
+        insert_cargo_dependency(
+            &cargo_path,
+            &[("axum", r#"{ version = "0.8", features = ["json", "multipart"] }"#)],
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&cargo_path).unwrap();
+        assert!(result.contains(r#""json""#));
+        assert!(result.contains(r#""multipart""#));
+    }
 }

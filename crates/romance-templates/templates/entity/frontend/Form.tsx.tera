@@ -5,10 +5,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 {% if has_fk_fields %}import { useQuery } from '@tanstack/react-query';
 {% endif %}import { useCreate{{ entity_name }}, useUpdate{{ entity_name }}, use{{ entity_name }} } from './hooks';
 import type { Create{{ entity_name }} } from './types';
-{% for field in fields %}{% if field.relation %}import { {{ field.relation_camel }}Api } from '@/features/{{ field.relation_camel }}/api';
-{% endif %}{% endfor %}import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+{% for imp in fk_imports %}import { {{ imp.relation_camel }}Api } from '@/features/{{ imp.relation_camel }}/api';
+{% endfor %}import { Button } from '@/components/ui/button';
+{% if has_input_field %}import { Input } from '@/components/ui/input';
+{% endif %}import { Label } from '@/components/ui/label';
 {% if has_textarea_field %}import { Textarea } from '@/components/ui/textarea';
 {% endif %}import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 {% if has_fk_fields %}import {
@@ -67,7 +67,11 @@ export default function {{ entity_name }}Form() {
     resolver: zodResolver(schema),
     values: existing ? {
 {% for field in fields %}
+{% if field.is_json %}
+      {{ field.name }}: existing.{{ field.name }} != null ? String(typeof existing.{{ field.name }} === 'object' ? JSON.stringify(existing.{{ field.name }}) : existing.{{ field.name }}) : undefined,
+{% else %}
       {{ field.name }}: existing.{{ field.name }},
+{% endif %}
 {% endfor %}
     } : undefined,
   });

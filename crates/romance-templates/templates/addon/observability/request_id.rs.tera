@@ -37,7 +37,7 @@ pub async fn request_id_middleware(
     let mut response = next.run(request).await;
 
     response.headers_mut().insert(
-        X_REQUEST_ID,
+        X_REQUEST_ID.clone(),
         HeaderValue::from_str(&request_id).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
     );
 

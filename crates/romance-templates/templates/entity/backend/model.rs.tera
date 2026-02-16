@@ -208,7 +208,7 @@ pub struct {{ entity_name }}DetailResponse {
     // Nested relations (populated via ?include=)
 {% for rel in belongs_to_relations %}
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub {{ rel.target_snake }}: Option<serde_json::Value>,
+    pub {{ rel.detail_field }}: Option<serde_json::Value>,
 {% endfor %}
     pub created_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
@@ -222,7 +222,7 @@ impl From<Model> for {{ entity_name }}DetailResponse {
             {{ field.rust_name }}: m.{{ field.rust_name }},
 {% endfor %}
 {% for rel in belongs_to_relations %}
-            {{ rel.target_snake }}: None,
+            {{ rel.detail_field }}: None,
 {% endfor %}
             created_at: m.created_at,
             updated_at: m.updated_at,

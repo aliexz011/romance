@@ -201,19 +201,23 @@ fn inject_has_many(
     let relation_variant = fk_base.to_pascal_case();
 
     // 1. Inject Related impl into parent model
-    // Note: insert_at_marker is idempotent — if the exact string already exists, it's skipped.
-    // For multiple FKs from child to parent, only the first Related impl is generated
-    // (additional FKs produce different Relation variants but same Related trait).
+    // Only inject if Related<child::Entity> doesn't already exist — when multiple FKs
+    // from child to parent exist (e.g., creator_id + assignee_id → User), only the first
+    // Related impl should be generated (Rust allows only one impl per trait+type pair).
     let model_path = base.join(format!("entities/{}.rs", parent_snake));
-    let related_impl = format!(
-        r#"impl Related<super::{}::Entity> for Entity {{
+    let related_check = format!("impl Related<super::{}::Entity> for Entity", child_snake);
+    let model_content = std::fs::read_to_string(&model_path).unwrap_or_default();
+    if !model_content.contains(&related_check) {
+        let related_impl = format!(
+            r#"impl Related<super::{}::Entity> for Entity {{
     fn to() -> RelationDef {{
         super::{}::Relation::{}.def().rev()
     }}
 }}"#,
-        child_snake, child_snake, relation_variant
-    );
-    utils::insert_at_marker(&model_path, markers::RELATIONS, &related_impl)?;
+            child_snake, child_snake, relation_variant
+        );
+        utils::insert_at_marker(&model_path, markers::RELATIONS, &related_impl)?;
+    }
 
     // 2. Inject list handler into parent handlers
     // Disambiguate handler name when FK doesn't match simple parent_id pattern.
@@ -226,7 +230,19 @@ fn inject_has_many(
         format!("list_{}_by_{}", child_plural, fk_base)
     };
 
+    // Skip handler/route injection if parent doesn't have its own handlers/routes files.
+    // This happens for auth-generated entities (User) where handlers live in auth.rs.
     let handlers_path = base.join(format!("handlers/{}.rs", parent_snake));
+    let routes_path = base.join(format!("routes/{}.rs", parent_snake));
+
+    if !handlers_path.exists() || !routes_path.exists() {
+        println!(
+            "  Injected has-many: {} -> {} (via {}) [model only — no handlers/routes file]",
+            parent_entity, utils::pluralize(child_entity), fk_column
+        );
+        return Ok(());
+    }
+
     let handler_code = format!(
         r#"pub async fn {handler_name}(
     State(state): State<AppState>,
@@ -257,7 +273,6 @@ fn inject_has_many(
     )?;
 
     // 3. Inject route into parent routes
-    let routes_path = base.join(format!("routes/{}.rs", parent_snake));
     let parent_plural = utils::pluralize(&parent_snake);
 
     // URL path uses the same disambiguation as handler name
@@ -461,9 +476,13 @@ fn build_context(entity: &EntityDefinition) -> Context {
         .filter(|f| f.relation.is_some())
         .map(|f| {
             let target = f.relation.as_ref().unwrap();
+            // Use FK base name for the detail field (e.g., creator_id -> creator)
+            // This avoids duplicate fields when multiple FKs point to the same entity
+            let fk_base = f.name.strip_suffix("_id").unwrap_or(&f.name);
             serde_json::json!({
                 "target": target,
                 "target_snake": target.to_snake_case(),
+                "detail_field": fk_base.to_snake_case(),
                 "fk_field": f.name,
                 "fk_rust_name": utils::rust_ident(&f.name),
                 "optional": f.optional,
