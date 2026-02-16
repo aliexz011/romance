@@ -372,7 +372,14 @@ pub fn parse_entity(name: &str, field_strs: &[String]) -> Result<EntityDefinitio
         };
 
         let type_and_relation: Vec<&str> = type_and_relation_str.splitn(2, "->").collect();
-        let type_str = type_and_relation[0].to_lowercase();
+        // Support `uuid?->Entity` syntax: strip `?` from end of type part
+        let raw_type_str = type_and_relation[0];
+        let (type_str, type_optional) = if raw_type_str.ends_with('?') {
+            (raw_type_str[..raw_type_str.len() - 1].to_lowercase(), true)
+        } else {
+            (raw_type_str.to_lowercase(), false)
+        };
+        let optional = optional || type_optional;
 
         // Check for relation-only types (no column generated)
         match type_str.as_str() {
@@ -405,7 +412,7 @@ pub fn parse_entity(name: &str, field_strs: &[String]) -> Result<EntityDefinitio
             _ => {}
         }
 
-        let field_type = parse_field_type(type_and_relation[0])?;
+        let field_type = parse_field_type(&type_str)?;
         let relation = type_and_relation.get(1).map(|s| s.to_string());
 
         // Parse validations, searchable, and visibility from annotations
@@ -1056,6 +1063,28 @@ mod tests {
         assert!(entity.fields[0].optional);
         assert_eq!(entity.relations.len(), 1);
         assert!(entity.relations[0].optional);
+    }
+
+    // ── parse_entity: optional FK with ? before -> ────────────────────
+
+    #[test]
+    fn parse_entity_optional_fk_question_before_arrow() {
+        // uuid?->Entity syntax (? before ->)
+        let entity = parse_entity("Post", &["category_id:uuid?->Category".to_string()]).unwrap();
+        assert_eq!(entity.fields.len(), 1);
+        assert!(entity.fields[0].optional);
+        assert_eq!(entity.fields[0].relation.as_deref(), Some("Category"));
+        assert!(matches!(entity.fields[0].field_type, FieldType::Uuid));
+        assert_eq!(entity.relations.len(), 1);
+        assert!(entity.relations[0].optional);
+    }
+
+    #[test]
+    fn parse_entity_optional_fk_question_at_end() {
+        // uuid->Entity? syntax (? at end — already worked)
+        let entity = parse_entity("Post", &["category_id:uuid->Category?".to_string()]).unwrap();
+        assert_eq!(entity.fields.len(), 1);
+        assert!(entity.fields[0].optional);
     }
 
     // ── parse_entity: validation + relation combined ──────────────────

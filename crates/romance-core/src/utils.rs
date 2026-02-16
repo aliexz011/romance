@@ -69,6 +69,27 @@ pub fn pluralize(s: &str) -> String {
     }
 }
 
+/// Rust reserved keywords that must be escaped with `r#` when used as identifiers.
+pub const RUST_RESERVED_WORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
+    "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super",
+    "trait", "true", "type", "unsafe", "use", "where", "while", "yield",
+    // Reserved for future use
+    "abstract", "become", "box", "do", "final", "macro", "override", "priv", "try",
+    "typeof", "unsized", "virtual",
+];
+
+/// Escape a field name for use as a Rust identifier.
+/// Adds `r#` prefix if the name is a Rust reserved word.
+pub fn rust_ident(name: &str) -> String {
+    if RUST_RESERVED_WORDS.contains(&name) {
+        format!("r#{}", name)
+    } else {
+        name.to_string()
+    }
+}
+
 /// Pretty CLI output helpers using the `colored` crate.
 pub mod ui {
     use colored::Colorize;
@@ -181,6 +202,36 @@ mod tests {
         assert_eq!(pluralize("key"), "keys");
         assert_eq!(pluralize("boy"), "boys");
         assert_eq!(pluralize("guy"), "guys");
+    }
+
+    // ── rust_ident ────────────────────────────────────────────────────
+
+    #[test]
+    fn rust_ident_regular_name() {
+        assert_eq!(rust_ident("title"), "title");
+        assert_eq!(rust_ident("name"), "name");
+        assert_eq!(rust_ident("author_id"), "author_id");
+    }
+
+    #[test]
+    fn rust_ident_reserved_word() {
+        assert_eq!(rust_ident("type"), "r#type");
+        assert_eq!(rust_ident("match"), "r#match");
+        assert_eq!(rust_ident("fn"), "r#fn");
+        assert_eq!(rust_ident("struct"), "r#struct");
+        assert_eq!(rust_ident("impl"), "r#impl");
+        assert_eq!(rust_ident("use"), "r#use");
+        assert_eq!(rust_ident("mod"), "r#mod");
+        assert_eq!(rust_ident("async"), "r#async");
+        assert_eq!(rust_ident("await"), "r#await");
+        assert_eq!(rust_ident("yield"), "r#yield");
+    }
+
+    #[test]
+    fn rust_ident_future_reserved() {
+        assert_eq!(rust_ident("abstract"), "r#abstract");
+        assert_eq!(rust_ident("try"), "r#try");
+        assert_eq!(rust_ident("final"), "r#final");
     }
 
     // ── write_file ────────────────────────────────────────────────────

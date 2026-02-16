@@ -58,8 +58,8 @@ pub fn search_condition(search_columns: &[&str], search_term: &str) -> SimpleExp
     let tsvector_expr = tsvector_parts.join(" || ' ' || ");
 
     Expr::cust_with_values(
-        &format!("to_tsvector('english', {}) @@ to_tsquery('english', $1)", tsvector_expr),
-        [tsquery.into()],
+        format!("to_tsvector('english', {}) @@ to_tsquery('english', $1)", tsvector_expr),
+        [tsquery.into() as sea_orm::Value],
     )
 }
 
@@ -79,7 +79,7 @@ pub fn search_rank_expr(search_columns: &[&str], search_term: &str) -> SimpleExp
     let tsvector_expr = tsvector_parts.join(" || ' ' || ");
 
     Expr::cust_with_values(
-        &format!("ts_rank(to_tsvector('english', {}), to_tsquery('english', $1))", tsvector_expr),
-        [tsquery.into()],
+        format!("ts_rank(to_tsvector('english', {}), to_tsquery('english', $1))", tsvector_expr),
+        [tsquery.into() as sea_orm::Value],
     )
 }

@@ -5,7 +5,7 @@ use std::process::Command;
 pub fn migrate() -> Result<()> {
     println!("{}", "Running migrations...".bold());
     let status = Command::new("cargo")
-        .args(["run", "--bin", "migration", "--", "up"])
+        .args(["run", "-p", "migration", "--", "up"])
         .current_dir("backend")
         .status()?;
     if !status.success() {
@@ -18,7 +18,7 @@ pub fn migrate() -> Result<()> {
 pub fn rollback() -> Result<()> {
     println!("{}", "Rolling back last migration...".bold());
     let status = Command::new("cargo")
-        .args(["run", "--bin", "migration", "--", "down"])
+        .args(["run", "-p", "migration", "--", "down"])
         .current_dir("backend")
         .status()?;
     if !status.success() {
@@ -31,7 +31,7 @@ pub fn rollback() -> Result<()> {
 pub fn status() -> Result<()> {
     println!("{}", "Migration status:".bold());
     let status = Command::new("cargo")
-        .args(["run", "--bin", "migration", "--", "status"])
+        .args(["run", "-p", "migration", "--", "status"])
         .current_dir("backend")
         .status()?;
     if !status.success() {

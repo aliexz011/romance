@@ -20,22 +20,22 @@ pub struct Model {
     pub id: Uuid,
 {% for field in fields -%}
 {% if field.rust_type == "DateTimeWithTimeZone" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
-    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
-    pub {{ field.name }}: {{ field.rust_type }},
+    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
 {% elif field.rust_type == "Date" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
-    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
-    pub {{ field.name }}: {{ field.rust_type }},
+    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
 {% elif field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
-    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
-    pub {{ field.name }}: {{ field.rust_type }},
+    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
-{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
-{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% else %}{% if field.optional %}    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
 {% endif -%}
 {% endfor %}{% if has_multitenancy %}    pub tenant_id: Uuid,
@@ -56,7 +56,7 @@ pub enum Relation {
         from = "Column::{{ field.name | pascal_case }}",
         to = "super::{{ field.relation | snake_case }}::Column::Id"
     )]
-    {{ field.relation }},
+    {{ field.relation_variant }},
 {% endif -%}
 {% endfor %}{% if has_multitenancy %}    #[sea_orm(
         belongs_to = "super::tenant::Entity",
@@ -67,10 +67,10 @@ pub enum Relation {
 {% endif %}}
 
 {% for field in fields -%}
-{% if field.relation %}
+{% if field.relation and field.is_first_relation_to_target %}
 impl Related<super::{{ field.relation | snake_case }}::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::{{ field.relation }}.def()
+        Relation::{{ field.relation_variant }}.def()
     }
 }
 {% endif -%}
@@ -112,12 +112,12 @@ pub struct Create{{ entity_name }} {
 {% endfor -%}
 {% endif -%}
 {% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
-    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
-    pub {{ field.name }}: {{ field.rust_type }},
+    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
-{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
-{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% else %}{% if field.optional %}    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif -%}
 {% endif -%}
 {% endfor %}}
@@ -125,7 +125,7 @@ pub struct Create{{ entity_name }} {
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Update{{ entity_name }} {
 {% for field in fields %}{% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}    #[schema(value_type = Option<String>)]
-{% endif %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+{% endif %}    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% endfor %}}
 
 /// API response DTO — controls which fields are exposed.
@@ -135,12 +135,12 @@ pub struct {{ entity_name }}Response {
     pub id: Uuid,
 {% for field in fields %}
 {% if field.rust_type == "DateTimeWithTimeZone" or field.rust_type == "Date" or field.rust_type == "Decimal" %}{% if field.optional %}    #[schema(value_type = Option<String>)]
-    pub {{ field.name }}: Option<{{ field.rust_type }}>,
+    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
 {% else %}    #[schema(value_type = String)]
-    pub {{ field.name }}: {{ field.rust_type }},
+    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif %}
-{% else %}{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
-{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% else %}{% if field.optional %}    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -155,7 +155,7 @@ impl From<Model> for {{ entity_name }}Response {
         Self {
             id: m.id,
 {% for field in fields %}
-            {{ field.name }}: m.{{ field.name }},
+            {{ field.rust_name }}: m.{{ field.rust_name }},
 {% endfor %}
             created_at: m.created_at,
             updated_at: m.updated_at,
@@ -201,8 +201,8 @@ impl {{ entity_name }}Response {
 pub struct {{ entity_name }}DetailResponse {
     pub id: Uuid,
 {% for field in fields %}
-{% if field.optional %}    pub {{ field.name }}: Option<{{ field.rust_type }}>,
-{% else %}    pub {{ field.name }}: {{ field.rust_type }},
+{% if field.optional %}    pub {{ field.rust_name }}: Option<{{ field.rust_type }}>,
+{% else %}    pub {{ field.rust_name }}: {{ field.rust_type }},
 {% endif %}
 {% endfor %}
     // Nested relations (populated via ?include=)
@@ -219,7 +219,7 @@ impl From<Model> for {{ entity_name }}DetailResponse {
         Self {
             id: m.id,
 {% for field in fields %}
-            {{ field.name }}: m.{{ field.name }},
+            {{ field.rust_name }}: m.{{ field.rust_name }},
 {% endfor %}
 {% for rel in belongs_to_relations %}
             {{ rel.target_snake }}: None,

@@ -149,6 +149,15 @@ fn build_context(entity: &EntityDefinition) -> Context {
             let relation_camel = f.relation.as_ref().map(|r| r.to_lower_camel_case());
             let relation_plural = f.relation.as_ref().map(|r| crate::utils::pluralize(&r.to_snake_case()));
 
+            // Unique variable name for FK options queries (disambiguates multiple FKs to same entity)
+            // e.g., sender_id -> senderOptions, receiver_id -> receiverOptions
+            let fk_options_var = if f.relation.is_some() {
+                let base = f.name.strip_suffix("_id").unwrap_or(&f.name);
+                format!("{}Options", base.to_lower_camel_case())
+            } else {
+                String::new()
+            };
+
             // Smart input type: use field name hints for better HTML input types
             let input_type = if f.name.contains("email") {
                 "email"
@@ -172,6 +181,7 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 "relation_snake": relation_snake,
                 "relation_camel": relation_camel,
                 "relation_plural": relation_plural,
+                "fk_options_var": fk_options_var,
                 "validations": validations,
                 "has_validations": has_validations,
                 "is_numeric": context::is_numeric(&f.field_type),

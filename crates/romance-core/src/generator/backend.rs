@@ -127,6 +127,12 @@ pub fn generate(entity: &EntityDefinition, tracker: &mut GenerationTracker) -> R
     let features = ProjectFeatures::load(project_root);
     for rel in &entity.relations {
         if rel.relation_type == RelationType::BelongsTo {
+            // Skip self-referential FKs — the Related impl is already generated
+            // by the model template, and injecting a reverse has-many would create
+            // a duplicate Related impl (Bug #3)
+            if rel.target_entity.to_snake_case() == entity.name.to_snake_case() {
+                continue;
+            }
             if relation::entity_exists(project_root, &rel.target_entity) {
                 inject_has_many(
                     base,
@@ -190,7 +196,14 @@ fn inject_has_many(
     let child_snake = child_entity.to_snake_case();
     let fk_pascal = fk_column.to_pascal_case();
 
+    // Derive the Relation variant name from the FK column (matches model template)
+    let fk_base = fk_column.strip_suffix("_id").unwrap_or(fk_column);
+    let relation_variant = fk_base.to_pascal_case();
+
     // 1. Inject Related impl into parent model
+    // Note: insert_at_marker is idempotent — if the exact string already exists, it's skipped.
+    // For multiple FKs from child to parent, only the first Related impl is generated
+    // (additional FKs produce different Relation variants but same Related trait).
     let model_path = base.join(format!("entities/{}.rs", parent_snake));
     let related_impl = format!(
         r#"impl Related<super::{}::Entity> for Entity {{
@@ -198,15 +211,24 @@ fn inject_has_many(
         super::{}::Relation::{}.def().rev()
     }}
 }}"#,
-        child_snake, child_snake, parent_entity
+        child_snake, child_snake, relation_variant
     );
     utils::insert_at_marker(&model_path, markers::RELATIONS, &related_impl)?;
 
     // 2. Inject list handler into parent handlers
-    let handlers_path = base.join(format!("handlers/{}.rs", parent_snake));
+    // Disambiguate handler name when FK doesn't match simple parent_id pattern.
+    // e.g., sender_id on Account (parent=User) -> list_accounts_by_sender
+    // e.g., user_id on Post (parent=User) -> list_posts (no suffix needed)
     let child_plural = utils::pluralize(&child_snake);
+    let handler_name = if fk_base == parent_snake {
+        format!("list_{}", child_plural)
+    } else {
+        format!("list_{}_by_{}", child_plural, fk_base)
+    };
+
+    let handlers_path = base.join(format!("handlers/{}.rs", parent_snake));
     let handler_code = format!(
-        r#"pub async fn list_{child_plural}(
+        r#"pub async fn {handler_name}(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Query(params): Query<crate::pagination::PageRequest>,
@@ -224,7 +246,7 @@ fn inject_has_many(
     let meta = PageMeta::from_request(&params, total);
     Ok(ok_page(data, meta))
 }}"#,
-        child_plural = child_plural,
+        handler_name = handler_name,
         child_snake = child_snake,
         fk_pascal = fk_pascal,
     );
@@ -237,9 +259,17 @@ fn inject_has_many(
     // 3. Inject route into parent routes
     let routes_path = base.join(format!("routes/{}.rs", parent_snake));
     let parent_plural = utils::pluralize(&parent_snake);
+
+    // URL path uses the same disambiguation as handler name
+    let url_suffix = if fk_base == parent_snake {
+        child_plural.clone()
+    } else {
+        format!("{}-by-{}", child_plural, fk_base.replace('_', "-"))
+    };
+
     let route_line = format!(
-        "        .route(\"{}/{}/{{id}}/{}\", get({}::list_{}))",
-        api_prefix, parent_plural, child_plural, parent_snake, child_plural
+        "        .route(\"{}/{}/{{id}}/{}\", get({}::{}))",
+        api_prefix, parent_plural, url_suffix, parent_snake, handler_name
     );
     utils::insert_at_marker(
         &routes_path,
@@ -248,8 +278,8 @@ fn inject_has_many(
     )?;
 
     println!(
-        "  Injected has-many: {} -> {}",
-        parent_entity, utils::pluralize(child_entity)
+        "  Injected has-many: {} -> {} (via {})",
+        parent_entity, utils::pluralize(child_entity), fk_column
     );
     Ok(())
 }
@@ -271,7 +301,7 @@ fn build_seed_function(entity: &EntityDefinition) -> String {
             continue;
         }
         let faker_expr = field_type_to_faker(&f.field_type);
-        field_lines.push(format!("            {}: Set({}),", f.name, faker_expr));
+        field_lines.push(format!("            {}: Set({}),", utils::rust_ident(&f.name), faker_expr));
     }
 
     let fields_block = field_lines.join("\n");
@@ -344,6 +374,9 @@ fn build_context(entity: &EntityDefinition) -> Context {
     let has_searchable_fields = entity.fields.iter().any(|f| f.searchable);
     ctx.insert("has_searchable_fields", &has_searchable_fields);
 
+    // Track which target entities we've seen for deduplicating Related impls
+    let mut seen_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     let fields: Vec<serde_json::Value> = entity
         .fields
         .iter()
@@ -362,13 +395,32 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 _ => vec![],
             };
 
+            // Compute unique Relation variant name from FK field name
+            // e.g., sender_id -> Sender, author_id -> Author, user_id -> User
+            let relation_variant = if f.relation.is_some() {
+                let base = f.name.strip_suffix("_id").unwrap_or(&f.name);
+                base.to_pascal_case()
+            } else {
+                String::new()
+            };
+
+            // Only generate Related<target::Entity> impl for first FK to each target
+            let is_first = if let Some(ref target) = f.relation {
+                seen_targets.insert(target.clone())
+            } else {
+                false
+            };
+
             serde_json::json!({
                 "name": f.name,
+                "rust_name": utils::rust_ident(&f.name),
                 "rust_type": f.field_type.to_rust(),
                 "postgres_type": f.field_type.to_postgres(),
                 "sea_orm_column": f.field_type.to_sea_orm_column(),
                 "optional": f.optional,
                 "relation": f.relation,
+                "relation_variant": relation_variant,
+                "is_first_relation_to_target": is_first,
                 "validations": validations,
                 "has_validations": has_validations,
                 "is_numeric": context::is_numeric(&f.field_type),
@@ -413,6 +465,7 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 "target": target,
                 "target_snake": target.to_snake_case(),
                 "fk_field": f.name,
+                "fk_rust_name": utils::rust_ident(&f.name),
                 "optional": f.optional,
             })
         })

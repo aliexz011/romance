@@ -53,8 +53,8 @@ export default function {{ entity_name }}Form() {
   const createMutation = useCreate{{ entity_name }}();
   const updateMutation = useUpdate{{ entity_name }}();
 {% for field in fields %}{% if field.relation %}
-  const { data: {{ field.relation_camel }}Options } = useQuery({
-    queryKey: ['{{ field.relation_plural }}'],
+  const { data: {{ field.fk_options_var }} } = useQuery({
+    queryKey: ['{{ field.relation_plural }}', '{{ field.name }}'],
     queryFn: () => {{ field.relation_camel }}Api.list({ page: 1, perPage: 100 }),
   });
 {% endif %}{% endfor %}
@@ -103,7 +103,7 @@ export default function {{ entity_name }}Form() {
                   <SelectValue placeholder="Select {{ field.relation }}..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {{ "{" }}{{ field.relation_camel }}Options?.data?.map((item: any) => (
+                  {{ "{" }}{{ field.fk_options_var }}?.data?.map((item: any) => (
                     <SelectItem key={item.id} value={item.id}>
                       {item.name || item.title || item.email || item.id}
                     </SelectItem>

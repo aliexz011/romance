@@ -2112,6 +2112,26 @@ fn test_multiple_fks_to_same_entity() {
     let model = fs::read_to_string(project_dir.join("backend/src/entities/transfer.rs")).unwrap();
     assert!(model.contains("sender_id"), "Model should have sender_id field");
     assert!(model.contains("receiver_id"), "Model should have receiver_id field");
+
+    // Bug #2: Relation enum should have UNIQUE variant names (Sender, Receiver — not User, User)
+    assert!(model.contains("Sender,"), "Relation should have Sender variant");
+    assert!(model.contains("Receiver,"), "Relation should have Receiver variant");
+
+    // The enum should NOT have duplicate "User" variants
+    let user_variant_count = model.matches("    User,").count();
+    assert_eq!(user_variant_count, 0, "Should not have generic User variants, should use Sender/Receiver");
+
+    // Bug #2: Only one Related<user::Entity> impl should be generated
+    let related_count = model.matches("impl Related<super::user::Entity>").count();
+    assert!(related_count <= 1, "Should have at most 1 Related<user::Entity> impl, got {}", related_count);
+
+    // Bug #4: inject_has_many should create disambiguated handler names
+    let user_handlers = fs::read_to_string(project_dir.join("backend/src/handlers/user.rs")).unwrap();
+    assert!(user_handlers.contains("list_transfers_by_sender"), "Should have list_transfers_by_sender handler");
+    assert!(user_handlers.contains("list_transfers_by_receiver"), "Should have list_transfers_by_receiver handler");
+    // Should NOT have duplicate generic "list_transfers"
+    let generic_count = user_handlers.matches("fn list_transfers(").count();
+    assert_eq!(generic_count, 0, "Should not have generic list_transfers, should be disambiguated");
 }
 
 #[test]
@@ -2400,4 +2420,146 @@ fn test_full_entity_pipeline_backend_migration_frontend() {
     // Smart input type: author_email should get "email" input type
     let form = fs::read_to_string(fe_dir.join("BlogPostForm.tsx")).unwrap();
     assert!(form.contains("email"), "author_email field should have email input type");
+}
+
+// ── Bug #1: Reserved word escaping ──────────────────────────────────
+
+#[test]
+fn test_reserved_word_type_field_escaped() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_dir = dir.path().join("reserved-word-test");
+    setup_minimal_project(&project_dir);
+
+    let entity = romance_core::entity::parse_entity(
+        "Event",
+        &[
+            "name:string".to_string(),
+            "type:string".to_string(),
+        ],
+    ).unwrap();
+
+    with_cwd(&project_dir, || {
+        romance_core::generator::backend::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::migration::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::frontend::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+    });
+
+    // Backend model should use r#type for struct fields
+    let model = fs::read_to_string(project_dir.join("backend/src/entities/event.rs")).unwrap();
+    assert!(model.contains("pub r#type: String"), "Model should escape 'type' as r#type");
+    assert!(!model.contains("pub type: String"), "Model should NOT have bare 'type' field");
+
+    // Handlers should use r#type for field access
+    let handlers = fs::read_to_string(project_dir.join("backend/src/handlers/event.rs")).unwrap();
+    assert!(handlers.contains("r#type"), "Handlers should use r#type");
+
+    // Migration should use PascalCase Type (not a reserved word as enum variant)
+    let migration_dir = project_dir.join("backend/migration/src");
+    let migration_file = fs::read_dir(&migration_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().to_string_lossy().contains("create_event"))
+        .expect("Migration file should exist");
+    let migration = fs::read_to_string(migration_file.path()).unwrap();
+    assert!(migration.contains("Event::Type"), "Migration should use PascalCase Type variant");
+}
+
+// ── Bug #3: Self-referential FK ─────────────────────────────────────
+
+#[test]
+fn test_self_referential_fk_no_duplicate_related() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_dir = dir.path().join("self-ref-test");
+    setup_minimal_project(&project_dir);
+
+    let entity = romance_core::entity::parse_entity(
+        "Category",
+        &[
+            "name:string".to_string(),
+            "parent_id:uuid?->Category".to_string(),
+        ],
+    ).unwrap();
+
+    with_cwd(&project_dir, || {
+        romance_core::generator::backend::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::migration::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+    });
+
+    let model = fs::read_to_string(project_dir.join("backend/src/entities/category.rs")).unwrap();
+
+    // Should have exactly one Related<category::Entity> impl (from the BelongsTo)
+    let related_count = model.matches("impl Related<super::category::Entity>").count();
+    assert_eq!(related_count, 1, "Self-referential entity should have exactly 1 Related impl, got {}", related_count);
+
+    // The Relation variant should be Parent (from parent_id)
+    assert!(model.contains("Parent,"), "Relation variant should be Parent");
+
+    // The field should be optional
+    assert!(model.contains("pub parent_id: Option<Uuid>"), "parent_id should be optional");
+}
+
+// ── Bug #6: Optional FK syntax uuid?->Entity ────────────────────────
+
+#[test]
+fn test_optional_fk_question_before_arrow() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_dir = dir.path().join("opt-fk-test");
+    setup_minimal_project(&project_dir);
+
+    // Both syntax forms should work
+    let entity = romance_core::entity::parse_entity(
+        "Post",
+        &[
+            "title:string".to_string(),
+            "category_id:uuid?->Category".to_string(),
+        ],
+    ).unwrap();
+
+    assert_eq!(entity.fields.len(), 2);
+    assert!(entity.fields[1].optional, "category_id should be optional with uuid?->Category syntax");
+    assert_eq!(entity.fields[1].relation.as_deref(), Some("Category"));
+
+    with_cwd(&project_dir, || {
+        romance_core::generator::backend::generate(&entity, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+    });
+
+    let model = fs::read_to_string(project_dir.join("backend/src/entities/post.rs")).unwrap();
+    assert!(model.contains("pub category_id: Option<Uuid>"), "category_id should be Option<Uuid>");
+}
+
+// ── Bug #2+#4: Multiple FKs frontend disambiguation ────────────────
+
+#[test]
+fn test_multiple_fks_frontend_unique_variables() {
+    let dir = tempfile::tempdir().unwrap();
+    let project_dir = dir.path().join("multi-fk-fe-test");
+    setup_minimal_project(&project_dir);
+
+    let user = romance_core::entity::parse_entity("User", &["name:string".to_string()]).unwrap();
+    let message = romance_core::entity::parse_entity(
+        "Message",
+        &[
+            "body:text".to_string(),
+            "sender_id:uuid->User".to_string(),
+            "receiver_id:uuid->User".to_string(),
+        ],
+    ).unwrap();
+
+    with_cwd(&project_dir, || {
+        romance_core::generator::backend::generate(&user, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::migration::generate(&user, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+
+        romance_core::generator::backend::generate(&message, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::migration::generate(&message, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+        romance_core::generator::frontend::generate(&message, &mut romance_core::generator::plan::GenerationTracker::new()).unwrap();
+    });
+
+    // Frontend Form should have unique variable names for FK selects
+    let form = fs::read_to_string(project_dir.join("frontend/src/features/message/MessageForm.tsx")).unwrap();
+    assert!(form.contains("senderOptions"), "Should have senderOptions variable");
+    assert!(form.contains("receiverOptions"), "Should have receiverOptions variable");
+
+    // Should NOT have duplicate userOptions
+    let user_options_count = form.matches("userOptions").count();
+    assert_eq!(user_options_count, 0, "Should not have generic userOptions, got {}", user_options_count);
 }

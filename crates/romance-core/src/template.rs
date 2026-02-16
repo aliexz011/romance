@@ -27,6 +27,7 @@ impl TemplateEngine {
         tera.register_filter("camel_case", camel_case_filter);
         tera.register_filter("plural", plural_filter);
         tera.register_filter("title_case", title_case_filter);
+        tera.register_filter("rust_ident", rust_ident_filter);
 
         Ok(TemplateEngine { tera })
     }
@@ -87,6 +88,16 @@ fn title_case_filter(
     match value.as_str() {
         Some(s) => Ok(Value::String(s.to_title_case())),
         None => Err(tera::Error::msg("title_case filter expects a string")),
+    }
+}
+
+fn rust_ident_filter(
+    value: &Value,
+    _args: &HashMap<String, Value>,
+) -> tera::Result<Value> {
+    match value.as_str() {
+        Some(s) => Ok(Value::String(crate::utils::rust_ident(s))),
+        None => Err(tera::Error::msg("rust_ident filter expects a string")),
     }
 }
 
@@ -161,6 +172,18 @@ mod tests {
     fn title_case_filter_works() {
         let result = title_case_filter(&val("product_category"), &empty_args()).unwrap();
         assert_eq!(result.as_str().unwrap(), "Product Category");
+    }
+
+    #[test]
+    fn rust_ident_filter_works() {
+        let result = rust_ident_filter(&val("type"), &empty_args()).unwrap();
+        assert_eq!(result.as_str().unwrap(), "r#type");
+    }
+
+    #[test]
+    fn rust_ident_filter_non_reserved() {
+        let result = rust_ident_filter(&val("title"), &empty_args()).unwrap();
+        assert_eq!(result.as_str().unwrap(), "title");
     }
 
     // ── Filter error on non-string ────────────────────────────────────

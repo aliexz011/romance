@@ -16,7 +16,7 @@ use crate::routes::AppState;
 pub struct ListParams {
     #[serde(flatten)]
     pub page: PageRequest,
-{% for field in fields %}{% if field.filter_method != "skip" %}    pub {{ field.name }}: Option<String>,
+{% for field in fields %}{% if field.filter_method != "skip" %}    pub {{ field.rust_name }}: Option<String>,
 {% endif %}{% endfor %}    pub sort: Option<String>,
     pub order: Option<String>,
 }
@@ -54,42 +54,42 @@ pub async fn list(
 {% if soft_delete %}    query = query.filter(crate::entities::{{ entity_name_snake }}::Column::DeletedAt.is_null());
 {% endif %}
     // Apply field filters
-{% for field in fields %}{% if field.filter_method == "contains" %}    if let Some(ref v) = params.{{ field.name }} {
+{% for field in fields %}{% if field.filter_method == "contains" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if !v.is_empty() {
             query = query.filter(Column::{{ field.name | pascal_case }}.contains(v));
         }
     }
-{% elif field.filter_method == "eq" %}{% if field.rust_type == "bool" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.filter_method == "eq" %}{% if field.rust_type == "bool" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<bool>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% elif field.rust_type == "i32" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.rust_type == "i32" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<i32>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% elif field.rust_type == "i64" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.rust_type == "i64" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<i64>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% elif field.rust_type == "f64" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.rust_type == "f64" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<f64>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% elif field.rust_type == "Decimal" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.rust_type == "Decimal" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<sea_orm::prelude::Decimal>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% elif field.rust_type == "Uuid" %}    if let Some(ref v) = params.{{ field.name }} {
+{% elif field.rust_type == "Uuid" %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if let Ok(parsed) = v.parse::<Uuid>() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(parsed));
         }
     }
-{% else %}    if let Some(ref v) = params.{{ field.name }} {
+{% else %}    if let Some(ref v) = params.{{ field.rust_name }} {
         if !v.is_empty() {
             query = query.filter(Column::{{ field.name | pascal_case }}.eq(v.as_str()));
         }
@@ -163,7 +163,7 @@ pub async fn get(
 
 {% for rel in belongs_to_relations %}
         if includes.contains(&"{{ rel.target_snake }}") {
-{% if rel.optional %}            if let Some(fk_val) = detail.{{ rel.fk_field }} {
+{% if rel.optional %}            if let Some(fk_val) = detail.{{ rel.fk_rust_name }} {
                 let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(fk_val)
                     .one(&state.db)
                     .await?;
@@ -171,7 +171,7 @@ pub async fn get(
                     detail.{{ rel.target_snake }} = Some(serde_json::to_value(r)?);
                 }
             }
-{% else %}            let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(detail.{{ rel.fk_field }})
+{% else %}            let related = crate::entities::{{ rel.target_snake }}::Entity::find_by_id(detail.{{ rel.fk_rust_name }})
                 .one(&state.db)
                 .await?;
             if let Some(r) = related {
@@ -258,7 +258,7 @@ pub async fn create(
     let id = Uuid::new_v4();
     let model = ActiveModel {
         id: Set(id),
-{% for field in fields %}        {{ field.name }}: Set(input.{{ field.name }}),
+{% for field in fields %}        {{ field.rust_name }}: Set(input.{{ field.rust_name }}),
 {% endfor %}{% if has_multitenancy %}        tenant_id: Set(tenant.tenant_id),
 {% endif %}        created_at: Set(now),
         updated_at: Set(now),
@@ -330,11 +330,11 @@ pub async fn update(
     }
 
 {% for field in fields -%}
-{% if field.optional %}    if let Some(val) = input.{{ field.name }} {
-        model.{{ field.name }} = Set(Some(val));
+{% if field.optional %}    if let Some(val) = input.{{ field.rust_name }} {
+        model.{{ field.rust_name }} = Set(Some(val));
     }
-{% else %}    if let Some(val) = input.{{ field.name }} {
-        model.{{ field.name }} = Set(val);
+{% else %}    if let Some(val) = input.{{ field.rust_name }} {
+        model.{{ field.rust_name }} = Set(val);
     }
 {% endif -%}
 {% endfor %}    model.updated_at = Set(now);
@@ -582,7 +582,7 @@ pub async fn bulk_create(
         let id = Uuid::new_v4();
         let model = ActiveModel {
             id: Set(id),
-{% for field in fields %}            {{ field.name }}: Set(item.{{ field.name }}),
+{% for field in fields %}            {{ field.rust_name }}: Set(item.{{ field.rust_name }}),
 {% endfor %}{% if has_multitenancy %}            tenant_id: Set(tenant.tenant_id),
 {% endif %}            created_at: Set(now),
             updated_at: Set(now),
@@ -612,14 +612,14 @@ pub async fn bulk_delete(
     axum::Json(input): axum::Json<BulkDelete>,
 ) -> AppResult<ApiResponse<serde_json::Value>> {
 {% if soft_delete %}    let now = chrono::Utc::now().fixed_offset();
-    let mut bulk_query = Entity::update_many()
+    let {% if has_multitenancy %}mut {% endif %}bulk_query = Entity::update_many()
         .filter(Column::Id.is_in(input.ids));
 {% if has_multitenancy %}    bulk_query = bulk_query.filter(Column::TenantId.eq(tenant.tenant_id));
 {% endif %}    let result = bulk_query
         .col_expr(Column::DeletedAt, Expr::value(Some(now)))
         .exec(&state.db)
         .await?;
-{% else %}    let mut bulk_query = Entity::delete_many()
+{% else %}    let {% if has_multitenancy %}mut {% endif %}bulk_query = Entity::delete_many()
         .filter(Column::Id.is_in(input.ids));
 {% if has_multitenancy %}    bulk_query = bulk_query.filter(Column::TenantId.eq(tenant.tenant_id));
 {% endif %}    let result = bulk_query
