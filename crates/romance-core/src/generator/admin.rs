@@ -1,3 +1,4 @@
+use crate::generator::context::markers;
 use crate::relation;
 use crate::template::TemplateEngine;
 use crate::utils;
@@ -98,20 +99,19 @@ pub fn generate() -> Result<()> {
 
     // Register via markers
     let base = project_dir.join("backend/src");
-    let mods_marker = "// === ROMANCE:MODS ===";
     utils::insert_at_marker(
         &base.join("routes/mod.rs"),
-        mods_marker,
+        markers::MODS,
         "pub mod admin;",
     )?;
     utils::insert_at_marker(
         &base.join("handlers/mod.rs"),
-        mods_marker,
+        markers::MODS,
         "pub mod admin;",
     )?;
     utils::insert_at_marker(
         &base.join("routes/mod.rs"),
-        "// === ROMANCE:ROUTES ===",
+        markers::ROUTES,
         "        .merge(admin::router())",
     )?;
 

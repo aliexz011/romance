@@ -1,5 +1,7 @@
 use crate::entity::{EntityDefinition, FieldType, FieldVisibility, RelationType, ValidationRule};
+use crate::generator::context::{self, markers, ProjectFeatures};
 use crate::generator::junction;
+use crate::generator::plan::{self, GenerationTracker};
 use crate::relation;
 use crate::template::TemplateEngine;
 use crate::utils;
@@ -8,7 +10,35 @@ use heck::{ToPascalCase, ToSnakeCase};
 use std::path::Path;
 use tera::Context;
 
-pub fn generate(entity: &EntityDefinition) -> Result<()> {
+/// Pre-validate that all required markers exist before generation.
+pub fn validate(_entity: &EntityDefinition) -> Result<()> {
+    let base = Path::new("backend/src");
+    let mut checks = vec![
+        plan::check(base.join("routes/mod.rs"), markers::ROUTES),
+        plan::check(base.join("routes/mod.rs"), markers::MODS),
+        plan::check(base.join("entities/mod.rs"), markers::MODS),
+        plan::check(base.join("handlers/mod.rs"), markers::MODS),
+    ];
+
+    let seed_path = Path::new("backend/src/seed.rs");
+    if seed_path.exists() {
+        checks.push(plan::check(seed_path, markers::SEEDS));
+    }
+
+    let main_rs = base.join("main.rs");
+    if main_rs.exists() {
+        let content = std::fs::read_to_string(&main_rs).unwrap_or_default();
+        if content.contains(markers::OPENAPI_PATHS) {
+            checks.push(plan::check(&main_rs, markers::OPENAPI_PATHS));
+            checks.push(plan::check(&main_rs, markers::OPENAPI_SCHEMAS));
+            checks.push(plan::check(&main_rs, markers::OPENAPI_TAGS));
+        }
+    }
+
+    plan::validate_markers(&checks)
+}
+
+pub fn generate(entity: &EntityDefinition, tracker: &mut GenerationTracker) -> Result<()> {
     let engine = TemplateEngine::new()?;
     let ctx = build_context(entity);
     let snake_name = entity.name.to_snake_case();
@@ -19,45 +49,30 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     let model_content = engine.render("entity/backend/model.rs.tera", &ctx)?;
     let model_path = base.join(format!("entities/{}.rs", snake_name));
     utils::write_generated(&model_path, &model_content)?;
+    tracker.track(model_path.to_path_buf());
 
     // Generate handlers
     let handlers_content = engine.render("entity/backend/handlers.rs.tera", &ctx)?;
     let handlers_path = base.join(format!("handlers/{}.rs", snake_name));
     utils::write_generated(&handlers_path, &handlers_content)?;
+    tracker.track(handlers_path.to_path_buf());
 
     // Generate routes
     let routes_content = engine.render("entity/backend/routes.rs.tera", &ctx)?;
     let routes_path = base.join(format!("routes/{}.rs", snake_name));
     utils::write_generated(&routes_path, &routes_content)?;
+    tracker.track(routes_path.to_path_buf());
 
-    // Register route in routes/mod.rs
-    let routes_mod = base.join("routes/mod.rs");
-    let routes_marker = "// === ROMANCE:ROUTES ===";
-    let mods_marker = "// === ROMANCE:MODS ===";
-    utils::insert_at_marker(
-        &routes_mod,
-        routes_marker,
-        &format!("        .merge({snake_name}::router())"),
-    )?;
+    // Register module in entities/handlers/routes mod.rs files
+    context::register_backend_module(base, &snake_name)?;
 
-    // Add mod declaration to routes/mod.rs
-    utils::insert_at_marker(
-        &routes_mod,
-        mods_marker,
-        &format!("pub mod {};", snake_name),
-    )?;
-
-    // Add mod declaration to entities/mod.rs
-    let entities_mod = base.join("entities/mod.rs");
-    utils::insert_at_marker(&entities_mod, mods_marker, &format!("pub mod {};", snake_name))?;
-
-    // Add mod declaration to handlers/mod.rs
-    let handlers_mod = base.join("handlers/mod.rs");
-    utils::insert_at_marker(&handlers_mod, mods_marker, &format!("pub mod {};", snake_name))?;
-
-    // Register entity in OpenAPI spec
+    // Register entity in OpenAPI spec (only if OpenAPI markers are present)
     let main_rs = base.join("main.rs");
-    if main_rs.exists() {
+    let main_has_openapi = main_rs.exists()
+        && std::fs::read_to_string(&main_rs)
+            .map(|c| c.contains(markers::OPENAPI_PATHS))
+            .unwrap_or(false);
+    if main_has_openapi {
         // Add handler paths
         let paths = vec![
             format!("crate::handlers::{}::list", snake_name),
@@ -71,7 +86,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
         for path in &paths {
             utils::insert_at_marker(
                 &main_rs,
-                "// === ROMANCE:OPENAPI_PATHS ===",
+                markers::OPENAPI_PATHS,
                 &format!("        {},", path),
             )?;
         }
@@ -89,7 +104,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
         for schema in &schemas {
             utils::insert_at_marker(
                 &main_rs,
-                "// === ROMANCE:OPENAPI_SCHEMAS ===",
+                markers::OPENAPI_SCHEMAS,
                 &format!("            {},", schema),
             )?;
         }
@@ -97,7 +112,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
         // Add tag
         utils::insert_at_marker(
             &main_rs,
-            "// === ROMANCE:OPENAPI_TAGS ===",
+            markers::OPENAPI_TAGS,
             &format!(
                 "        (name = \"{}\", description = \"{} management\"),",
                 entity.name, entity.name
@@ -109,10 +124,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     // Note: junction (M2M) generation is deferred to generate_relations()
     // to ensure the entity migration runs first.
     let project_root = Path::new(".");
-    let config = crate::config::RomanceConfig::load(project_root).ok();
-    let api_prefix = config.as_ref()
-        .and_then(|c| c.backend.api_prefix.clone())
-        .unwrap_or_else(|| "/api".to_string());
+    let features = ProjectFeatures::load(project_root);
     for rel in &entity.relations {
         if rel.relation_type == RelationType::BelongsTo {
             if relation::entity_exists(project_root, &rel.target_entity) {
@@ -121,7 +133,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
                     &rel.target_entity,
                     &entity.name,
                     &rel.fk_column.clone().unwrap_or_else(|| format!("{}_id", rel.target_entity.to_snake_case())),
-                    &api_prefix,
+                    &features.api_prefix,
                 )?;
             }
         }
@@ -133,7 +145,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     let seed_path = Path::new("backend/src/seed.rs");
     if seed_path.exists() {
         let seed_fn = build_seed_function(entity);
-        utils::insert_at_marker(seed_path, "// === ROMANCE:SEEDS ===", &seed_fn)?;
+        utils::insert_at_marker(seed_path, markers::SEEDS, &seed_fn)?;
     }
 
     Ok(())
@@ -188,7 +200,7 @@ fn inject_has_many(
 }}"#,
         child_snake, child_snake, parent_entity
     );
-    utils::insert_at_marker(&model_path, "// === ROMANCE:RELATIONS ===", &related_impl)?;
+    utils::insert_at_marker(&model_path, markers::RELATIONS, &related_impl)?;
 
     // 2. Inject list handler into parent handlers
     let handlers_path = base.join(format!("handlers/{}.rs", parent_snake));
@@ -218,7 +230,7 @@ fn inject_has_many(
     );
     utils::insert_at_marker(
         &handlers_path,
-        "// === ROMANCE:RELATION_HANDLERS ===",
+        markers::RELATION_HANDLERS,
         &handler_code,
     )?;
 
@@ -231,7 +243,7 @@ fn inject_has_many(
     );
     utils::insert_at_marker(
         &routes_path,
-        "// === ROMANCE:RELATION_ROUTES ===",
+        markers::RELATION_ROUTES,
         &route_line,
     )?;
 
@@ -320,29 +332,14 @@ fn build_context(entity: &EntityDefinition) -> Context {
     ctx.insert("entity_name", &entity.name);
     ctx.insert("entity_name_snake", &entity.name.to_snake_case());
 
-    // Check project-level features
-    let project_root = Path::new(".");
-    let config = crate::config::RomanceConfig::load(project_root).ok();
-    let soft_delete = config.as_ref().map(|c| c.has_feature("soft_delete")).unwrap_or(false);
-    let has_validation = config.as_ref().map(|c| c.has_feature("validation")).unwrap_or(false);
-    let has_search = config.as_ref().map(|c| c.has_feature("search")).unwrap_or(false);
-    let has_audit = config.as_ref().map(|c| c.has_feature("audit_log")).unwrap_or(false);
-    let has_multitenancy = config.as_ref().map(|c| c.has_feature("multitenancy")).unwrap_or(false);
-
-    // Detect if auth has been generated (backend/src/auth.rs exists)
-    let has_auth = project_root.join("backend/src/auth.rs").exists();
-
-    let api_prefix = config.as_ref()
-        .and_then(|c| c.backend.api_prefix.clone())
-        .unwrap_or_else(|| "/api".to_string());
-    ctx.insert("api_prefix", &api_prefix);
-
-    ctx.insert("soft_delete", &soft_delete);
-    ctx.insert("has_validation", &has_validation);
-    ctx.insert("has_search", &has_search);
-    ctx.insert("has_audit", &has_audit);
-    ctx.insert("has_auth", &has_auth);
-    ctx.insert("has_multitenancy", &has_multitenancy);
+    let features = ProjectFeatures::load(Path::new("."));
+    ctx.insert("api_prefix", &features.api_prefix);
+    ctx.insert("soft_delete", &features.soft_delete);
+    ctx.insert("has_validation", &features.has_validation);
+    ctx.insert("has_search", &features.has_search);
+    ctx.insert("has_audit", &features.has_audit);
+    ctx.insert("has_auth", &features.has_auth);
+    ctx.insert("has_multitenancy", &features.has_multitenancy);
 
     let has_searchable_fields = entity.fields.iter().any(|f| f.searchable);
     ctx.insert("has_searchable_fields", &has_searchable_fields);
@@ -351,49 +348,8 @@ fn build_context(entity: &EntityDefinition) -> Context {
         .fields
         .iter()
         .map(|f| {
-            let validations: Vec<serde_json::Value> = f
-                .validations
-                .iter()
-                .map(|v| match v {
-                    ValidationRule::Min(n) => serde_json::json!({"type": "min", "value": n}),
-                    ValidationRule::Max(n) => serde_json::json!({"type": "max", "value": n}),
-                    ValidationRule::Email => serde_json::json!({"type": "email"}),
-                    ValidationRule::Url => serde_json::json!({"type": "url"}),
-                    ValidationRule::Regex(r) => serde_json::json!({"type": "regex", "value": r}),
-                    ValidationRule::Required => serde_json::json!({"type": "required"}),
-                    ValidationRule::Unique => serde_json::json!({"type": "unique"}),
-                })
-                .collect();
-
+            let validations = context::validation_rules_to_json(&f.validations);
             let has_validations = !f.validations.is_empty();
-            let is_numeric = matches!(
-                f.field_type,
-                crate::entity::FieldType::Int32
-                    | crate::entity::FieldType::Int64
-                    | crate::entity::FieldType::Float64
-                    | crate::entity::FieldType::Decimal
-            );
-
-            // Determine the filter strategy based on field type:
-            // - "contains" for String/Text types (partial match with ILIKE)
-            // - "eq" for exact-match types (bool, int, uuid, etc.)
-            // - "skip" for types that shouldn't be filtered (Json, File, Image)
-            let filter_method = match f.field_type {
-                crate::entity::FieldType::String
-                | crate::entity::FieldType::Text
-                | crate::entity::FieldType::Enum(_) => "contains",
-                crate::entity::FieldType::Bool
-                | crate::entity::FieldType::Int32
-                | crate::entity::FieldType::Int64
-                | crate::entity::FieldType::Float64
-                | crate::entity::FieldType::Decimal
-                | crate::entity::FieldType::Uuid
-                | crate::entity::FieldType::DateTime
-                | crate::entity::FieldType::Date => "eq",
-                crate::entity::FieldType::Json
-                | crate::entity::FieldType::File
-                | crate::entity::FieldType::Image => "skip",
-            };
 
             let visibility_str = match &f.visibility {
                 FieldVisibility::Public => "public",
@@ -415,11 +371,11 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 "relation": f.relation,
                 "validations": validations,
                 "has_validations": has_validations,
-                "is_numeric": is_numeric,
+                "is_numeric": context::is_numeric(&f.field_type),
                 "searchable": f.searchable,
-                "is_file": matches!(f.field_type, crate::entity::FieldType::File),
-                "is_image": matches!(f.field_type, crate::entity::FieldType::Image),
-                "filter_method": filter_method,
+                "is_file": matches!(f.field_type, FieldType::File),
+                "is_image": matches!(f.field_type, FieldType::Image),
+                "filter_method": context::filter_method(&f.field_type),
                 "visibility": visibility_str,
                 "visibility_roles": visibility_roles,
             })

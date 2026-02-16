@@ -1,4 +1,6 @@
-use crate::entity::{EntityDefinition, RelationType, ValidationRule};
+use crate::entity::{EntityDefinition, RelationType};
+use crate::generator::context::{self, markers, ProjectFeatures};
+use crate::generator::plan::{self, GenerationTracker};
 use crate::template::TemplateEngine;
 use crate::utils;
 use anyhow::Result;
@@ -6,7 +8,18 @@ use heck::{ToLowerCamelCase, ToPascalCase, ToSnakeCase};
 use std::path::Path;
 use tera::Context;
 
-pub fn generate(entity: &EntityDefinition) -> Result<()> {
+/// Pre-validate that frontend markers exist in App.tsx.
+pub fn validate(_entity: &EntityDefinition) -> Result<()> {
+    let app_path = Path::new("frontend/src/App.tsx");
+    let checks = vec![
+        plan::check(app_path, markers::IMPORTS),
+        plan::check(app_path, markers::APP_ROUTES),
+        plan::check(app_path, markers::NAV_LINKS),
+    ];
+    plan::validate_markers(&checks)
+}
+
+pub fn generate(entity: &EntityDefinition, tracker: &mut GenerationTracker) -> Result<()> {
     let engine = TemplateEngine::new()?;
     let ctx = build_context(entity);
     let snake_name = entity.name.to_snake_case();
@@ -17,27 +30,39 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
 
     // Types
     let content = engine.render("entity/frontend/types.ts.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join("types.ts"), &content)?;
+    let types_path = feature_dir.join("types.ts");
+    utils::write_generated(&types_path, &content)?;
+    tracker.track(types_path);
 
     // API client
     let content = engine.render("entity/frontend/api.ts.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join("api.ts"), &content)?;
+    let api_path = feature_dir.join("api.ts");
+    utils::write_generated(&api_path, &content)?;
+    tracker.track(api_path);
 
     // Hooks
     let content = engine.render("entity/frontend/hooks.ts.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join("hooks.ts"), &content)?;
+    let hooks_path = feature_dir.join("hooks.ts");
+    utils::write_generated(&hooks_path, &content)?;
+    tracker.track(hooks_path);
 
     // List component
     let content = engine.render("entity/frontend/List.tsx.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join(format!("{}List.tsx", entity.name)), &content)?;
+    let list_path = feature_dir.join(format!("{}List.tsx", entity.name));
+    utils::write_generated(&list_path, &content)?;
+    tracker.track(list_path);
 
     // Form component
     let content = engine.render("entity/frontend/Form.tsx.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join(format!("{}Form.tsx", entity.name)), &content)?;
+    let form_path = feature_dir.join(format!("{}Form.tsx", entity.name));
+    utils::write_generated(&form_path, &content)?;
+    tracker.track(form_path);
 
     // Detail component
     let content = engine.render("entity/frontend/Detail.tsx.tera", &ctx)?;
-    utils::write_generated(&feature_dir.join(format!("{}Detail.tsx", entity.name)), &content)?;
+    let detail_path = feature_dir.join(format!("{}Detail.tsx", entity.name));
+    utils::write_generated(&detail_path, &content)?;
+    tracker.track(detail_path);
 
     // Inject imports and routes into App.tsx
     let app_path = base.join("App.tsx");
@@ -47,7 +72,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     // Imports
     utils::insert_at_marker(
         &app_path,
-        "// === ROMANCE:IMPORTS ===",
+        markers::IMPORTS,
         &format!(
             "import {entity_pascal}List from '@/features/{camel_name}/{entity_pascal}List'\nimport {entity_pascal}Form from '@/features/{camel_name}/{entity_pascal}Form'\nimport {entity_pascal}Detail from '@/features/{camel_name}/{entity_pascal}Detail'",
         ),
@@ -56,7 +81,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     // Routes
     utils::insert_at_marker(
         &app_path,
-        "{/* === ROMANCE:APP_ROUTES === */}",
+        markers::APP_ROUTES,
         &format!(
             "              <Route path=\"/{plural}\" element={{<{entity_pascal}List />}} />\n              <Route path=\"/{plural}/new\" element={{<{entity_pascal}Form />}} />\n              <Route path=\"/{plural}/:id\" element={{<{entity_pascal}Detail />}} />\n              <Route path=\"/{plural}/:id/edit\" element={{<{entity_pascal}Form />}} />",
         ),
@@ -65,7 +90,7 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     // Nav link
     utils::insert_at_marker(
         &app_path,
-        "{/* === ROMANCE:NAV_LINKS === */}",
+        markers::NAV_LINKS,
         &format!(
             "                <Link to=\"/{plural}\" className=\"text-muted-foreground hover:text-foreground transition-colors\">{entity_pascal}</Link>",
             plural = plural,
@@ -79,10 +104,9 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
             let rel_ctx = build_relation_context(&entity.name, &rel.target_entity);
             let content = engine.render("entity/frontend/relation_hooks.ts.tera", &rel_ctx)?;
             let related_snake = rel.target_entity.to_snake_case();
-            utils::write_file(
-                &feature_dir.join(format!("{}_hooks.ts", related_snake)),
-                &content,
-            )?;
+            let rel_hooks_path = feature_dir.join(format!("{}_hooks.ts", related_snake));
+            utils::write_file(&rel_hooks_path, &content)?;
+            tracker.track(rel_hooks_path);
         }
     }
 
@@ -110,44 +134,16 @@ fn build_context(entity: &EntityDefinition) -> Context {
     ctx.insert("entity_name_snake", &entity.name.to_snake_case());
     ctx.insert("entity_name_camel", &entity.name.to_lower_camel_case());
 
-    // Check project-level features
-    let project_root = Path::new(".");
-    let config = crate::config::RomanceConfig::load(project_root).ok();
-    let has_validation = config.as_ref().map(|c| c.has_feature("validation")).unwrap_or(false);
-
-    ctx.insert("has_validation", &has_validation);
-
-    let api_prefix = config.as_ref()
-        .and_then(|c| c.backend.api_prefix.clone())
-        .unwrap_or_else(|| "/api".to_string());
-    ctx.insert("api_prefix", &api_prefix);
+    let features = ProjectFeatures::load(Path::new("."));
+    ctx.insert("has_validation", &features.has_validation);
+    ctx.insert("api_prefix", &features.api_prefix);
 
     let fields: Vec<serde_json::Value> = entity
         .fields
         .iter()
         .map(|f| {
-            let validations: Vec<serde_json::Value> = f
-                .validations
-                .iter()
-                .map(|v| match v {
-                    ValidationRule::Min(n) => serde_json::json!({"type": "min", "value": n}),
-                    ValidationRule::Max(n) => serde_json::json!({"type": "max", "value": n}),
-                    ValidationRule::Email => serde_json::json!({"type": "email"}),
-                    ValidationRule::Url => serde_json::json!({"type": "url"}),
-                    ValidationRule::Regex(r) => serde_json::json!({"type": "regex", "value": r}),
-                    ValidationRule::Required => serde_json::json!({"type": "required"}),
-                    ValidationRule::Unique => serde_json::json!({"type": "unique"}),
-                })
-                .collect();
-
+            let validations = context::validation_rules_to_json(&f.validations);
             let has_validations = !f.validations.is_empty();
-            let is_numeric = matches!(
-                f.field_type,
-                crate::entity::FieldType::Int32
-                    | crate::entity::FieldType::Int64
-                    | crate::entity::FieldType::Float64
-                    | crate::entity::FieldType::Decimal
-            );
 
             let relation_snake = f.relation.as_ref().map(|r| r.to_snake_case());
             let relation_camel = f.relation.as_ref().map(|r| r.to_lower_camel_case());
@@ -166,24 +162,6 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 f.field_type.input_type()
             };
 
-            // Determine filter method for List component filter inputs
-            let filter_method = match f.field_type {
-                crate::entity::FieldType::String
-                | crate::entity::FieldType::Text
-                | crate::entity::FieldType::Enum(_) => "contains",
-                crate::entity::FieldType::Bool
-                | crate::entity::FieldType::Int32
-                | crate::entity::FieldType::Int64
-                | crate::entity::FieldType::Float64
-                | crate::entity::FieldType::Decimal
-                | crate::entity::FieldType::Uuid
-                | crate::entity::FieldType::DateTime
-                | crate::entity::FieldType::Date => "eq",
-                crate::entity::FieldType::Json
-                | crate::entity::FieldType::File
-                | crate::entity::FieldType::Image => "skip",
-            };
-
             serde_json::json!({
                 "name": f.name,
                 "ts_type": f.field_type.to_typescript(),
@@ -196,11 +174,11 @@ fn build_context(entity: &EntityDefinition) -> Context {
                 "relation_plural": relation_plural,
                 "validations": validations,
                 "has_validations": has_validations,
-                "is_numeric": is_numeric,
+                "is_numeric": context::is_numeric(&f.field_type),
                 "searchable": f.searchable,
                 "is_file": matches!(f.field_type, crate::entity::FieldType::File),
                 "is_image": matches!(f.field_type, crate::entity::FieldType::Image),
-                "filter_method": filter_method,
+                "filter_method": context::filter_method(&f.field_type),
             })
         })
         .collect();

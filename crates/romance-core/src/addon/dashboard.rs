@@ -1,4 +1,5 @@
 use crate::addon::Addon;
+use crate::generator::context::markers;
 use anyhow::Result;
 use std::path::Path;
 
@@ -194,7 +195,7 @@ fn install_dashboard(project_root: &Path) -> Result<()> {
     )?;
     utils::insert_at_marker(
         &project_root.join("frontend/src/App.tsx"),
-        "// === ROMANCE:APP_ROUTES ===",
+        markers::APP_ROUTES,
         "          <Route path=\"/dev\" element={<DevDashboard />} />",
     )?;
 

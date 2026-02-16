@@ -1,4 +1,5 @@
 use crate::config::RomanceConfig;
+use crate::generator::context::{self, markers};
 use crate::template::TemplateEngine;
 use crate::utils;
 use anyhow::Result;
@@ -76,41 +77,30 @@ pub fn generate() -> Result<()> {
 
     // Register modules via markers
     let base = project_dir.join("backend/src");
-    let mods_marker = "// === ROMANCE:MODS ===";
 
     utils::insert_at_marker(
         &base.join("entities/mod.rs"),
-        mods_marker,
+        markers::MODS,
         "pub mod user;",
     )?;
     utils::insert_at_marker(
         &base.join("handlers/mod.rs"),
-        mods_marker,
+        markers::MODS,
         "pub mod auth;",
     )?;
     utils::insert_at_marker(
         &base.join("routes/mod.rs"),
-        mods_marker,
+        markers::MODS,
         "pub mod auth;",
     )?;
     utils::insert_at_marker(
         &base.join("routes/mod.rs"),
-        "// === ROMANCE:ROUTES ===",
+        markers::ROUTES,
         "        .merge(auth::router())",
     )?;
 
     // Register migration
-    let lib_path = project_dir.join("backend/migration/src/lib.rs");
-    utils::insert_at_marker(
-        &lib_path,
-        "// === ROMANCE:MIGRATION_MODS ===",
-        &format!("mod {};", migration_module),
-    )?;
-    utils::insert_at_marker(
-        &lib_path,
-        "// === ROMANCE:MIGRATIONS ===",
-        &format!("            Box::new({}::Migration),", migration_module),
-    )?;
+    context::register_migration(project_dir, &migration_module)?;
 
     // Add dependencies to Cargo.toml
     insert_cargo_dependency(

@@ -1,3 +1,4 @@
+use crate::generator::context::{self, markers};
 use crate::relation;
 use crate::template::TemplateEngine;
 use crate::utils;
@@ -85,7 +86,7 @@ pub fn generate(
     let entities_mod = base.join("entities/mod.rs");
     utils::insert_at_marker(
         &entities_mod,
-        "// === ROMANCE:MODS ===",
+        markers::MODS,
         &format!("pub mod {};", junction_snake),
     )?;
 
@@ -98,17 +99,7 @@ pub fn generate(
     utils::write_file(&migration_path, &migration_content)?;
 
     // 4. Register migration in lib.rs
-    let lib_path = Path::new("backend/migration/src/lib.rs");
-    utils::insert_at_marker(
-        lib_path,
-        "// === ROMANCE:MIGRATION_MODS ===",
-        &format!("mod {};", migration_module),
-    )?;
-    utils::insert_at_marker(
-        lib_path,
-        "// === ROMANCE:MIGRATIONS ===",
-        &format!("            Box::new({}::Migration),", migration_module),
-    )?;
+    context::register_migration(Path::new("."), &migration_module)?;
 
     // 5. Inject Related<T> via junction + M2M handlers/routes into source entity
     inject_m2m_into_entity(&engine, source_entity, target_entity, &junction)?;
@@ -164,7 +155,7 @@ fn inject_m2m_into_entity(
         );
         utils::insert_at_marker(
             &model_path,
-            "// === ROMANCE:RELATIONS ===",
+            markers::RELATIONS,
             &related_impl,
         )?;
     }
@@ -189,7 +180,7 @@ fn inject_m2m_into_entity(
             let trimmed = part.trim_end_matches('\n');
             utils::insert_at_marker(
                 &handlers_path,
-                "// === ROMANCE:RELATION_HANDLERS ===",
+                markers::RELATION_HANDLERS,
                 trimmed,
             )?;
         }
@@ -223,7 +214,7 @@ fn inject_m2m_into_entity(
             let trimmed = part.trim_end_matches('\n');
             utils::insert_at_marker(
                 &routes_path,
-                "// === ROMANCE:RELATION_ROUTES ===",
+                markers::RELATION_ROUTES,
                 trimmed,
             )?;
         }

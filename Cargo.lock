@@ -816,6 +816,7 @@ dependencies = [
  "colored",
  "dialoguer",
  "heck",
+ "regex",
  "romance-templates",
  "serde",
  "serde_json",

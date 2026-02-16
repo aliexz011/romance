@@ -20,10 +20,26 @@ pub fn run_entity(name: &str, fields: &[String]) -> Result<()> {
         eprintln!("  {} {}", "warn".yellow(), warning);
     }
 
-    romance_core::generator::backend::generate(&entity)?;
-    romance_core::generator::migration::generate(&entity)?;
-    romance_core::generator::backend::generate_relations(&entity)?;
-    romance_core::generator::frontend::generate(&entity)?;
+    // Phase 1: Pre-validate all markers before writing any files
+    romance_core::generator::backend::validate(&entity)?;
+    romance_core::generator::migration::validate(&entity)?;
+    romance_core::generator::frontend::validate(&entity)?;
+
+    // Phase 2: Generate with rollback tracking
+    let mut tracker = romance_core::generator::plan::GenerationTracker::new();
+    let result = (|| -> Result<()> {
+        romance_core::generator::backend::generate(&entity, &mut tracker)?;
+        romance_core::generator::migration::generate(&entity, &mut tracker)?;
+        romance_core::generator::backend::generate_relations(&entity)?;
+        romance_core::generator::frontend::generate(&entity, &mut tracker)?;
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        eprintln!("  {} Generation failed: {}", "error".red(), e);
+        tracker.rollback();
+        return Err(e);
+    }
 
     // Regenerate AI context with updated schema
     romance_core::ai_context::regenerate(project_root)?;

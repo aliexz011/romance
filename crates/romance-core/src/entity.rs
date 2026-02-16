@@ -242,7 +242,9 @@ fn parse_field_type(s: &str) -> Result<FieldType> {
 /// Parse validation rules from a bracket-enclosed string like `[min=3,max=100,email]`.
 /// Visibility annotations (`admin_only`, `authenticated`, `roles=hr,admin`) are
 /// skipped here and handled by `parse_visibility()` instead.
-fn parse_validations(s: &str) -> Vec<ValidationRule> {
+///
+/// Returns an error if a regex pattern is invalid or min/max values are not valid integers.
+fn parse_validations(s: &str) -> Result<Vec<ValidationRule>> {
     let mut rules = Vec::new();
 
     for part in s.split(',') {
@@ -254,17 +256,20 @@ fn parse_validations(s: &str) -> Vec<ValidationRule> {
         if let Some((key, value)) = part.split_once('=') {
             match key.trim() {
                 "min" => {
-                    if let Ok(n) = value.trim().parse::<u64>() {
-                        rules.push(ValidationRule::Min(n));
-                    }
+                    let n = value.trim().parse::<u64>()
+                        .map_err(|_| anyhow::anyhow!("Invalid min value '{}': expected a positive integer", value.trim()))?;
+                    rules.push(ValidationRule::Min(n));
                 }
                 "max" => {
-                    if let Ok(n) = value.trim().parse::<u64>() {
-                        rules.push(ValidationRule::Max(n));
-                    }
+                    let n = value.trim().parse::<u64>()
+                        .map_err(|_| anyhow::anyhow!("Invalid max value '{}': expected a positive integer", value.trim()))?;
+                    rules.push(ValidationRule::Max(n));
                 }
                 "regex" => {
-                    rules.push(ValidationRule::Regex(value.trim().to_string()));
+                    let pattern = value.trim().to_string();
+                    regex::Regex::new(&pattern)
+                        .map_err(|e| anyhow::anyhow!("Invalid regex pattern '{}': {}", pattern, e))?;
+                    rules.push(ValidationRule::Regex(pattern));
                 }
                 "roles" => {} // Handled by parse_visibility
                 _ => {}
@@ -283,7 +288,7 @@ fn parse_validations(s: &str) -> Vec<ValidationRule> {
         }
     }
 
-    rules
+    Ok(rules)
 }
 
 /// Parse field visibility from bracket annotations.
@@ -404,7 +409,7 @@ pub fn parse_entity(name: &str, field_strs: &[String]) -> Result<EntityDefinitio
         let relation = type_and_relation.get(1).map(|s| s.to_string());
 
         // Parse validations, searchable, and visibility from annotations
-        let validations = parse_validations(&annotations);
+        let validations = parse_validations(&annotations)?;
         let searchable = annotations.contains("searchable");
         let visibility = parse_visibility(&annotations);
 
@@ -986,7 +991,7 @@ mod tests {
 
     #[test]
     fn parse_validations_mixed() {
-        let rules = parse_validations("min=5,max=200,email,unique");
+        let rules = parse_validations("min=5,max=200,email,unique").unwrap();
         assert_eq!(rules.len(), 4);
         assert!(rules.contains(&ValidationRule::Min(5)));
         assert!(rules.contains(&ValidationRule::Max(200)));
@@ -996,15 +1001,50 @@ mod tests {
 
     #[test]
     fn parse_validations_regex() {
-        let rules = parse_validations("regex=^[a-z]+$");
+        let rules = parse_validations("regex=^[a-z]+$").unwrap();
         assert_eq!(rules.len(), 1);
         assert!(matches!(&rules[0], ValidationRule::Regex(r) if r == "^[a-z]+$"));
     }
 
     #[test]
     fn parse_validations_empty() {
-        let rules = parse_validations("");
+        let rules = parse_validations("").unwrap();
         assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn parse_validations_invalid_regex_errors() {
+        let result = parse_validations("regex=[invalid");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid regex pattern"));
+    }
+
+    #[test]
+    fn parse_validations_valid_regex_succeeds() {
+        let rules = parse_validations("regex=^\\d{3}-\\d{4}$").unwrap();
+        assert_eq!(rules.len(), 1);
+        assert!(matches!(&rules[0], ValidationRule::Regex(r) if r == "^\\d{3}-\\d{4}$"));
+    }
+
+    #[test]
+    fn parse_validations_invalid_min_errors() {
+        let result = parse_validations("min=abc");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid min value"));
+    }
+
+    #[test]
+    fn parse_validations_negative_max_errors() {
+        let result = parse_validations("max=-5");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid max value"));
+    }
+
+    #[test]
+    fn parse_validations_invalid_max_errors() {
+        let result = parse_validations("max=not_a_number");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid max value"));
     }
 
     // ── parse_entity: optional belongs_to ─────────────────────────────

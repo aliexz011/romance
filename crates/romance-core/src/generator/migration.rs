@@ -1,4 +1,6 @@
 use crate::entity::EntityDefinition;
+use crate::generator::context::{self, markers, ProjectFeatures};
+use crate::generator::plan::{self, GenerationTracker};
 use crate::template::TemplateEngine;
 use crate::utils;
 use anyhow::Result;
@@ -52,7 +54,17 @@ pub fn next_timestamp() -> String {
     base
 }
 
-pub fn generate(entity: &EntityDefinition) -> Result<()> {
+/// Pre-validate that migration markers exist.
+pub fn validate(_entity: &EntityDefinition) -> Result<()> {
+    let lib_path = Path::new("backend/migration/src/lib.rs");
+    let checks = vec![
+        plan::check(lib_path, markers::MIGRATION_MODS),
+        plan::check(lib_path, markers::MIGRATIONS),
+    ];
+    plan::validate_markers(&checks)
+}
+
+pub fn generate(entity: &EntityDefinition, tracker: &mut GenerationTracker) -> Result<()> {
     let engine = TemplateEngine::new()?;
 
     let timestamp = next_timestamp();
@@ -63,15 +75,11 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     ctx.insert("entity_name_snake", &snake_name);
     ctx.insert("timestamp", &timestamp);
 
-    // Check project-level features
-    let project_root = Path::new(".");
-    let config = crate::config::RomanceConfig::load(project_root).ok();
-    let soft_delete = config.as_ref().map(|c| c.has_feature("soft_delete")).unwrap_or(false);
-    let has_search = config.as_ref().map(|c| c.has_feature("search")).unwrap_or(false);
+    let features = ProjectFeatures::load(Path::new("."));
     let has_searchable_fields = entity.fields.iter().any(|f| f.searchable);
 
-    ctx.insert("soft_delete", &soft_delete);
-    ctx.insert("has_search", &has_search);
+    ctx.insert("soft_delete", &features.soft_delete);
+    ctx.insert("has_search", &features.has_search);
     ctx.insert("has_searchable_fields", &has_searchable_fields);
 
     let fields: Vec<serde_json::Value> = entity
@@ -96,22 +104,10 @@ pub fn generate(entity: &EntityDefinition) -> Result<()> {
     let migration_path =
         Path::new("backend/migration/src").join(format!("{}.rs", migration_module));
     utils::write_file(&migration_path, &content)?;
+    tracker.track(migration_path.to_path_buf());
 
     // Register migration in lib.rs
-    let lib_path = Path::new("backend/migration/src/lib.rs");
-    utils::insert_at_marker(
-        lib_path,
-        "// === ROMANCE:MIGRATION_MODS ===",
-        &format!("mod {};", migration_module),
-    )?;
-    utils::insert_at_marker(
-        lib_path,
-        "// === ROMANCE:MIGRATIONS ===",
-        &format!(
-            "            Box::new({}::Migration),",
-            migration_module
-        ),
-    )?;
+    context::register_migration(Path::new("."), &migration_module)?;
 
     println!("  Generated migration for '{}'", entity.name);
     Ok(())

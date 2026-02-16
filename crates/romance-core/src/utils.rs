@@ -34,10 +34,19 @@ pub fn write_generated(path: &Path, generated: &str) -> Result<()> {
 }
 
 /// Insert a line before a named marker in a file.
+///
+/// Returns an error if the marker is not found in the file.
 pub fn insert_at_marker(path: &Path, marker: &str, line: &str) -> Result<()> {
     let content = fs::read_to_string(path)?;
     if content.contains(line) {
         return Ok(());
+    }
+    if !content.contains(marker) {
+        anyhow::bail!(
+            "Marker '{}' not found in {}",
+            marker,
+            path.display()
+        );
     }
     let new_content = content.replace(marker, &format!("{}\n{}", line, marker));
     fs::write(path, new_content)?;
@@ -233,6 +242,20 @@ mod tests {
         let user_pos = content.find("pub mod user;").unwrap();
         assert!(post_pos < marker_pos);
         assert!(user_pos < marker_pos);
+    }
+
+    #[test]
+    fn insert_at_marker_missing_marker_errors() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp, "// header").unwrap();
+        writeln!(tmp, "// no marker here").unwrap();
+        tmp.flush().unwrap();
+
+        let result = insert_at_marker(tmp.path(), "// === ROMANCE:MODS ===", "pub mod post;");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Marker"));
+        assert!(err_msg.contains("ROMANCE:MODS"));
     }
 
     // ── read_with_custom_block ────────────────────────────────────────
