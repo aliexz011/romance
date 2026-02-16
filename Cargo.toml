@@ -11,5 +11,5 @@ version = "0.2.5"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/aliexz011/romance"
-homepage = "https://romance.dev"
-authors = ["Romance Team <team@romance.dev>"]
+homepage = "https://romance.aliexz.com"
+authors = ["Romance Team <team@romance.aliexz.com>"]
